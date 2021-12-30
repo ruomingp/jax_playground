@@ -4,6 +4,7 @@ from jax.experimental import maps
 from jax.experimental import mesh_utils
 from jax.experimental import PartitionSpec
 from jax.experimental.pjit import pjit
+from jax.experimental.pjit import with_sharding_constraint
 import numpy as np
 
 print(jax.__version__)
@@ -31,13 +32,13 @@ y_spec = PartitionSpec('data', None)
 
 def mlp(params, x):
     x = x @ params['w1']
+    x = with_sharding_constraint(x, PartitionSpec('data', 'model'))
     x = jnp.fmax(x, 0)
     x = x @ jnp.transpose(params['w2'])
     return x
 
 
-# f = pjit(mlp, in_axis_resources=(param_spec, x_spec), out_axis_resources=y_spec, donate_argnums=(0,))
-f = pjit(mlp, in_axis_resources=(param_spec, x_spec), out_axis_resources=y_spec, donate_argnums=(0,))
+f = pjit(mlp, in_axis_resources=(param_spec, x_spec), out_axis_resources=y_spec)
  
 # Sends data to accelerators based on partition_spec
 with maps.mesh(mesh.devices, mesh.axis_names):
