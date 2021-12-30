@@ -14,15 +14,32 @@ devices = mesh_utils.create_device_mesh(mesh_shape)
 mesh = maps.Mesh(devices, ('data', 'model'))
 print(mesh)
 
-input_data = np.arange(8 * 2).reshape(8, 2)
-print(input_data)
+x = np.arange(8 * 2).reshape(8, 2)
+print(x)
 
-in_spec = PartitionSpec('data', None)
-out_spec = PartitionSpec('data', 'model')
+rng_key = jax.random.PRNGKey(42)
+params = {}
+param_spec = {}
+for k in ('w1', 'w2'):
+    rng_key, sub_key = jax.random.split(rng_key)
+    params[k]= jax.random.normal(sub_key, shape=(2, 6))
+    param_spec[k] = PartitionSpec(None, 'model')
 
-f = pjit(lambda x: x, in_axis_resources=in_spec, out_axis_resources=out_spec)
+x_spec = PartitionSpec('data', None)
+y_spec = PartitionSpec('data', None)
+# y_spec = PartitionSpec('data', 'model')
+
+def mlp(params, x):
+    x = x @ params['w1']
+    x = jnp.fmax(x, 0)
+    x = x @ jnp.transpose(params['w2'])
+    return x
+
+
+# f = pjit(mlp, in_axis_resources=(param_spec, x_spec), out_axis_resources=y_spec, donate_argnums=(0,))
+f = pjit(mlp, in_axis_resources=(param_spec, x_spec), out_axis_resources=y_spec, donate_argnums=(0,))
  
 # Sends data to accelerators based on partition_spec
 with maps.mesh(mesh.devices, mesh.axis_names):
-      data = f(input_data)
-print(data)
+      y = f(params, x)
+print(y)
