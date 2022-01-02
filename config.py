@@ -257,7 +257,7 @@ class Config:
 
         def _default_enter_fn(key: str, val: Any):
             if isinstance(val, Config):
-                return [(_SubKey(key, k), v) for k, v in val.items()]
+                return [(_sub_key(key, k), v) for k, v in val.items()]
             elif isinstance(val, dict):
                 return [(f'{key}[{k}]', v) for k, v in val.items()]
             elif dataclasses.is_dataclass(val):
@@ -269,7 +269,7 @@ class Config:
             else:
                 return None  # do not enter 'val'
 
-        def _SubKey(key, subkey):
+        def _sub_key(key, subkey):
             if key:
                 return f'{key}.{subkey}'
             return subkey
@@ -279,7 +279,7 @@ class Config:
     def _similar_keys(self, name: str) -> List[str]:
         """Return a list of field keys that are similar to name."""
 
-        def _Overlaps(name: str, key: str) -> float:
+        def _overlaps(name: str, key: str) -> float:
             """The fraction of 3-char substrings in <name> that appear in key."""
             matches = 0
             trials = 0
@@ -291,7 +291,7 @@ class Config:
                 return float(matches) / trials
             return 0
 
-        return [key for key in self.keys() if _Overlaps(name, key) > 0.5]
+        return [key for key in self.keys() if _overlaps(name, key) > 0.5]
 
     def _key_error_string(self, name: str) -> str:
         similar = self._similar_keys(name)
@@ -370,7 +370,7 @@ class Configurable:
         return cfg
 
     def __init__(self, config: Config):
-        self.__dict__['_config'] = copy.deepcopy(config).freeze()
+        self._config = copy.deepcopy(config).freeze()
 
     @property
     def config(self):
