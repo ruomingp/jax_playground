@@ -10,7 +10,7 @@ from jax import numpy as jnp
 
 import layers
 import module
-from module import Module, Context
+from module import Module, InvocationContext
 from attention import MultiheadAttention, TransformerLayer, TransformerAttentionLayer, TransformerFeedForwardLayer
 from torch_modules import MultiheadAttention, TransformerEncoderLayer, TransformerDecoderLayer
 
@@ -186,7 +186,7 @@ class TransformerLayerTest(_BaseTest):
             else:
                 mask = mask.to(jnp.bool).to(device=device).unsqueeze(0).tile((batch_size, 1, 1))
                 src_mask = mask.repeat_interleave(num_heads, dim=0)
-            context = Context(is_training=True, prng_key=jax.random.PRNGKey(123), parameters=params)
+            context = InvocationContext(is_training=True, prng_key=jax.random.PRNGKey(123), parameters=params)
             with module.root_context(copy.deepcopy(context)):
                 ref_outputs = ref(inputs, src_mask=src_mask).detach()
             idist.reinit_rng(123)

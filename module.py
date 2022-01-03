@@ -54,7 +54,7 @@ def standard_output_collections():
 
 
 @dataclass
-class Context:
+class InvocationContext:
     module: 'Module'
     parameters: NestedParameters
     is_training: bool
@@ -72,9 +72,9 @@ class Context:
             else:
                 kwargs[k] = copy.deepcopy(getattr(self, k))
         assert kwargs['module'] is self.module
-        return Context(**kwargs)
+        return InvocationContext(**kwargs)
 
-    def add_child(self, name: str) -> 'Context':
+    def add_child(self, name: str) -> 'InvocationContext':
         self.prng_key, child_key = jax.random.split(self.prng_key)
         if self.output_collections is None:
             child_output_collections = None
@@ -83,19 +83,19 @@ class Context:
                 collection_name: collection.add_child(name) for collection_name, collection in
                 self.output_collections.items()
             }
-        return Context(is_training=self.is_training, prng_key=child_key, parameters=self.parameters.get(name),
-                       output_collections=child_output_collections)
+        return InvocationContext(is_training=self.is_training, prng_key=child_key, parameters=self.parameters.get(name),
+                                 output_collections=child_output_collections)
 
 
 @dataclass
 class ContextStack(threading.local):
-    stack: List[Context]
+    stack: List[InvocationContext]
 
 
 _global_context_stack = ContextStack(stack=[])
 
 
-def current_context() -> Context:
+def current_context() -> InvocationContext:
     global _global_context_stack
     if not _global_context_stack.stack:
         return None
@@ -103,7 +103,7 @@ def current_context() -> Context:
 
 
 @contextlib.contextmanager
-def invocation_context(context: Context):
+def set_current_context(context: InvocationContext):
     global _global_context_stack
     try:
         _global_context_stack.stack.append(context)
@@ -113,18 +113,18 @@ def invocation_context(context: Context):
 
 
 @contextlib.contextmanager
-def root_context(context: Context):
+def root_context(context: InvocationContext):
     global _global_context_stack
     if _global_context_stack.stack:
-        raise ValueError('Already within a Context')
-    with invocation_context(context) as c:
+        raise ValueError('Already within a InvocationContext')
+    with set_current_context(context) as c:
         yield c
 
 
 @contextlib.contextmanager
 def child_context(name: str):
     context = current_context().add_child(name)
-    with invocation_context(context) as c:
+    with set_current_context(context) as c:
         yield c
 
 
@@ -241,7 +241,7 @@ class Module(config_lib.Configurable):
         return self.param_init().initialize(name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype)
 
     def make_invocation_context(self, **kwargs):
-        return Context(module=self, **kwargs)
+        return InvocationContext(module=self, **kwargs)
 
     def get_invocation_context(self):
         context = current_context()
@@ -267,11 +267,11 @@ class Module(config_lib.Configurable):
 
         f = lambda: getattr(self, method)(*args, **kwargs)
         if context is not None:
-            with invocation_context(context):
+            with set_current_context(context):
                 return f()
         context = current_context()
         if context is None:
-            raise ValueError(f'context is required when {self} is invoked outside of a Context.')
+            raise ValueError(f'context is required when {self} is invoked outside of an InvocationContext.')
         if context.module is self:
             return f()
         if context.module is self.parent:
