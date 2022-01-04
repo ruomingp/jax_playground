@@ -333,8 +333,9 @@ class MultiheadAttention(Module):
             mask = mask[:, None, :, :]
         probs = masked_softmax(logits, mask=mask)
         probs = self.dropout(probs)
+        self.add_summary('atten_probs', probs)
         context = jnp.einsum("bnts,bsnh->btnh", probs, v_proj)
-        logging.info("MultiheadAttention.context=%s", context[0, 0].reshape([-1]))
+        # logging.info("MultiheadAttention.context=%s", context[0, 0].reshape([-1]))
         # [batch, target_length, output_dim].
         outputs = self.o_proj(context)
         return self.Output(data=outputs, probs=probs)
@@ -423,7 +424,7 @@ class TransformerAttentionLayer(Module):
             atten_output = self.attention(
                 query=target, key=source, value=source, mask=mask
             )
-            logging.info("atten_output=%s", atten_output.data[0, 0])
+            # logging.info("atten_output=%s", atten_output.data[0, 0])
             # Post-norm: norm applied on the sum of input and attention output.
             data = self.norm(target + self.dropout(atten_output.data))
         else:
@@ -467,8 +468,11 @@ class TransformerFeedForwardLayer(Module):
             "linear2",
             cfg.linear_tpl.set(input_dim=cfg.hidden_dim, output_dim=cfg.input_dim),
         )
-        self._add_child("dropout1", cfg.dropout)
-        self._add_child("dropout2", cfg.dropout)
+        if cfg.structure == "prenorm":
+            self._add_child("dropout1", cfg.dropout)
+            self._add_child("dropout2", cfg.dropout)
+        else:
+            self._add_child("dropout", cfg.dropout)
 
     def forward(self, inputs: Tensor) -> Tensor:
         cfg = self.config
@@ -484,7 +488,7 @@ class TransformerFeedForwardLayer(Module):
             x = self.linear1(inputs)
             x = get_activation_fn(cfg.activation)(x)
             x = self.linear2(x)
-            x = self.dropout1(x)
+            x = self.dropout(x)
             x = self.norm(x + inputs)
         else:
             raise NotImplementedError(cfg.structure)

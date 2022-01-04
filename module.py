@@ -14,7 +14,7 @@ import dataclasses
 import re
 import threading
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union, Set
 
 import jax
 from absl import logging
@@ -27,32 +27,44 @@ NestedParameters = Dict[str, Union[jnp.ndarray, "NestedParameters"]]
 
 
 class OutputCollection:
-    # Some standard collection names.
-    SUMMARY = "summary"
-    PARAMETER_UPDATES = "parameter_updates"
 
-    def __init__(self, outputs: Dict[str, Union[jnp.ndarray, "OutputCollection"]]):
-        self._outputs = outputs
+    # Some standard section names.
+    SECTION_DEFAULT = ""
+    SECTION_SUMMARY = "summary"
+    SECTION_PARAMETER_UPDATE = "parameter_update"
 
-    def add_value(self, name: str, value: jnp.ndarray):
-        self._insert(name, value)
+    def __init__(self):
+        self._all_names: Set[str] = set()
+        self._children: Dict[str, "OutputCollection"] = dict()
+        self._sections: Dict[str, Dict[str, jnp.ndarray]] = dict()
+
+    def _check_name(self, name):
+        if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
+            raise ValueError(f'Invalid name "{name}"')
+        if name in self._all_names:
+            raise ValueError(f'{name} already added as a child or output')
+        self._all_names.add(name)
+
+    def add_value(self, name: str, value: jnp.ndarray, *, section: str=SECTION_DEFAULT):
+        self._check_name(name)
+        if section not in self._sections:
+            self._sections[section] = {}
+        self._sections[section][name] = value
 
     def add_child(self, name: str) -> "OutputCollection":
-        child = OutputCollection({})
-        self._insert(name, child)
-        return child
+        self._check_name(name)
+        self._children[name] = OutputCollection()
+        return self._children[name]
 
-    def _insert(self, name: str, value: Union[jnp.ndarray, "OutputCollection"]):
-        if name in self._outputs:
-            raise ValueError(f"{name} already added")
-        self._outputs[name] = value
-
-
-def standard_output_collections():
-    return {
-        name: OutputCollection({})
-        for name in (OutputCollection.SUMMARY, OutputCollection.PARAMETER_UPDATES)
-    }
+    def get_values_recursively(self, section: str=SECTION_DEFAULT) -> Dict[str, Union[jnp.ndarray, dict]]:
+        results = {}
+        if section in self._sections:
+            results.update(self._sections[section])
+        for child_name, child_collection in self._children.items():
+            child_values = child_collection.get_values_recursively(section)
+            if child_values:
+                results[child_name] = child_values
+        return results
 
 
 @dataclass
@@ -61,7 +73,7 @@ class InvocationContext:
     parameters: NestedParameters
     is_training: bool
     prng_key: jax.random.KeyArray
-    output_collections: Optional[Dict[str, OutputCollection]] = None
+    output_collection: OutputCollection
 
     def clone(self, **override_kwargs):
         kwargs = {}
@@ -78,19 +90,12 @@ class InvocationContext:
 
     def add_child(self, name: str) -> "InvocationContext":
         self.prng_key, child_key = jax.random.split(self.prng_key)
-        if self.output_collections is None:
-            child_output_collections = None
-        else:
-            child_output_collections = {
-                collection_name: collection.add_child(name)
-                for collection_name, collection in self.output_collections.items()
-            }
         return InvocationContext(
             module=getattr(self.module, name),
             is_training=self.is_training,
             prng_key=child_key,
             parameters=self.parameters.get(name),
-            output_collections=child_output_collections,
+            output_collection=self.output_collection.add_child(name),
         )
 
 
@@ -269,7 +274,7 @@ class Module(config_lib.Configurable):
         )
 
     def make_invocation_context(self, **kwargs):
-        return InvocationContext(module=self, **kwargs)
+        return InvocationContext(module=self, output_collection=OutputCollection(), **kwargs)
 
     def get_invocation_context(self):
         context = current_context()
@@ -286,6 +291,14 @@ class Module(config_lib.Configurable):
     @property
     def parameters(self):
         return self.get_invocation_context().parameters
+
+    def add_summary(self, name: str, value: jnp.ndarray):
+        return self.get_invocation_context().output_collection.add_value(
+            name, value, section=OutputCollection.SECTION_SUMMARY)
+
+    def add_parameter_update(self, name: str, value: jnp.ndarray):
+        return self.get_invocation_context().output_collection.add_value(
+            name, value, section=OutputCollection.SECTION_PARAMETER_UPDATE)
 
     def __call__(self, *args, method="forward", context=None, **kwargs) -> Any:
         if len(args) > 1:

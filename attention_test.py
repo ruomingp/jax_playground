@@ -1,31 +1,28 @@
-import math
-
-import copy
+import jax
 import numpy as np
 import torch
 from absl import logging
 from absl.testing import absltest
-import jax
 from jax import nn
 from jax import numpy as jnp
+from transformers.models.roberta import modeling_roberta as hf_roberta
 
 import attention
 import layers
 import module
-from module import Module, InvocationContext
 from attention import (
-    MultiheadAttention,
     TransformerLayer,
     TransformerAttentionLayer,
-    TransformerFeedForwardLayer,
 )
-
-# from torch.nn import MultiheadAttention, TransformerEncoderLayer, TransformerDecoderLayer
-from transformers.models.roberta import modeling_roberta as hf_roberta
+from module import Module
 
 
 def _assert_allclose(a, b, atol=1e-6, rtol=1e-3):
     np.testing.assert_allclose(a, b, atol=atol, rtol=rtol, err_msg=np.abs(a - b).max())
+
+
+def _shapes(nested_tensor):
+    return jax.tree_map(lambda x: x.shape, nested_tensor)
 
 
 def _random_mask(prng_key, tgt_len, src_len):
@@ -373,15 +370,19 @@ class TransformerTest(absltest.TestCase):
         for mask in (None, null_mask, rand_mask):
             if mask is not None:
                 mask = mask[None, None, :, :].tile((batch_size, num_heads, 1, 1))
+            context = layer.make_invocation_context(
+                parameters=layer_params,
+                is_training=True,
+                prng_key=jax.random.PRNGKey(0),
+            )
             layer_outputs: TransformerLayer.Output = layer(
                 jnp.asarray(target),
                 self_attention_mask=mask,
-                context=layer.make_invocation_context(
-                    parameters=layer_params,
-                    is_training=True,
-                    prng_key=jax.random.PRNGKey(0),
-                ),
+                context=context
             )
+            logging.info('Auxiliary outputs=%s', context.output_collection.get_values_recursively())
+            logging.info('Summary=%s', _shapes(
+                context.output_collection.get_values_recursively(module.OutputCollection.SECTION_SUMMARY)))
             attn_mask = None if mask is None else _as_torch_tensor(mask)
             (ref_outputs,) = ref.forward(
                 torch.as_tensor(target, dtype=torch.float32),
