@@ -27,7 +27,6 @@ NestedParameters = Dict[str, Union[jnp.ndarray, 'NestedParameters']]
 
 
 class OutputCollection:
-
     # Some standard collection names.
     SUMMARY = 'summary'
     PARAMETER_UPDATES = 'parameter_updates'
@@ -83,8 +82,8 @@ class InvocationContext:
                 collection_name: collection.add_child(name) for collection_name, collection in
                 self.output_collections.items()
             }
-        return InvocationContext(is_training=self.is_training, prng_key=child_key, parameters=self.parameters.get(name),
-                                 output_collections=child_output_collections)
+        return InvocationContext(module=getattr(self.module, name), is_training=self.is_training, prng_key=child_key,
+                                 parameters=self.parameters.get(name), output_collections=child_output_collections)
 
 
 @dataclass
@@ -200,7 +199,7 @@ class Module(config_lib.Configurable):
         child_config = copy.deepcopy(child_config)
         if not issubclass(child_config.cls, Module):
             raise TypeError(f'add_child expects a Module config, got {child_config}')
-        if child_config.name is not None and child_config.name != name:
+        if child_config.name and child_config.name != name:
             raise ValueError(f'child_config already has a different name: {child_config.name} vs. {name}')
         child_config.name = name
         module = child_config.freeze().instantiate(parent=self, **kwargs)
@@ -219,7 +218,7 @@ class Module(config_lib.Configurable):
         return params
 
     def _initialize_module_parameters(self, *, prng_key: jax.random.KeyArray) -> NestedParameters:
-        raise NotImplementedError(type(self))
+        return {}
 
     def _initialize_parameter(self, name: str, *, prng_key: jax.random.KeyArray, shape: Sequence[int],
                               dtype: Optional[jnp.dtype] = None) -> jnp.ndarray:
@@ -238,7 +237,7 @@ class Module(config_lib.Configurable):
         """
         if name in self._children:
             raise ValueError(f'Child {name} already exists.')
-        return self.param_init().initialize(name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype)
+        return self.param_init().initialize(name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype())
 
     def make_invocation_context(self, **kwargs):
         return InvocationContext(module=self, **kwargs)

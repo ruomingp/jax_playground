@@ -42,11 +42,12 @@ class DefaultInit(Init):
         std = cfg.gain / math.sqrt(fan)
         if cfg.distribution == 'uniform':
             b = math.sqrt(3) * std
-            return jax.random.uniform(prng_key, shape=shape, dtype=dtype, minval=-b, maxval=b)
+            weight = jax.random.uniform(prng_key, shape=shape, dtype=dtype, minval=-b, maxval=b)
         elif cfg.distribution == 'normal':
-            return jax.random.normal(prng_key, shape=shape, dtype=dtype) * std
+            weight = jax.random.normal(prng_key, shape=shape, dtype=dtype) * std
         else:
             raise NotImplementedError(f'Unsupported distribution ({cfg.distribution})')
+        return weight
 
     def _get_fan(self, name: str, shape: Shape):
         cfg = self.config

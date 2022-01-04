@@ -1,15 +1,98 @@
+import math
 from dataclasses import dataclass
 from typing import Optional
 
 import jax
+from absl import logging
 from jax import numpy as jnp
 
 import config as config_lib
 import param_init
-from layers import check_numerics, RMSNorm, Dropout, Linear, get_activation_fn
+from layers import check_numerics, LayerNorm, Dropout, Linear, get_activation_fn
 from module import Module, NestedParameters
 
 Tensor = jnp.ndarray
+
+
+def make_causal_mask(seq_len: int) -> Tensor:
+    """Generates attention mask for causal masking.
+
+    Args:
+        seq_len: sequence length.
+
+    Returns:
+        A boolean tensor of shape [seq_len, seq_len] where the value at [i, j] = False if i >= j.
+    """
+    indexes = jnp.arange(seq_len)
+    return indexes[:, None] < indexes[None, :]
+
+
+def make_segment_mask(*, source_segments: Tensor, target_segments: Tensor) -> Tensor:
+    """Generates attention mask given the segment ids.
+
+    ... such that positions belonging to different segments cannot attend to each other.
+
+    Args:
+        source_segments: An integer tensor of shape [batch..., source_length].
+        target_segments: An integer tensor of shape [batch..., target_length].
+
+    Returns:
+        A boolean tensor of shape [batch..., target_length, source_length] where the value at [..., i, j] = False if
+        target_segments[..., i] == source_segments[..., j].
+    """
+    target_segments = jnp.expand_dims(target_segments, -1)
+    source_segments = jnp.expand_dims(source_segments, -2)
+    return source_segments != target_segments
+
+
+def t5_relative_position_bucket(relative_position, *, bidirectional=True, num_buckets=32, max_distance=128):
+    """Computes relative position buckets with the T5 algorithm.
+
+    Based on HuggingFace code:
+    https://github.com/huggingface/transformers/blob/v4.11.3/src/transformers/models/t5/modeling_t5.py#L346-L392
+
+    Translate relative position to a bucket number for relative attention. The relative position is defined as
+    memory_position - query_position, i.e. the distance in tokens from the attending position to the attended-to
+    position. If bidirectional=False, then positive relative positions are invalid. We use smaller buckets for
+    small absolute relative_position and larger buckets for larger absolute relative_positions. All relative
+    positions >= max_distance map to the same bucket. All relative positions <= -max_distance map to the same bucket.
+    This should allow for more graceful generalization to longer sequences than the model has been trained on.
+
+    Args:
+        relative_position: an int32 Tensor of any shape.
+        bidirectional: a boolean - whether the attention is bidirectional.
+        num_buckets: an integer.
+        max_distance: an integer.
+
+    Returns:
+        A Tensor with the same shape as relative_position, containing int32 values in the range [0, num_buckets).
+    """
+    relative_buckets = 0
+    if bidirectional:
+        num_buckets //= 2
+        relative_buckets += (relative_position > 0).astype(jnp.int32) * num_buckets
+        relative_position = jnp.abs(relative_position)
+    else:
+        relative_position = -jnp.minimum(relative_position, jnp.zeros_like(relative_position))
+    # now relative_position is in the range [0, inf)
+
+    # half of the buckets are for exact increments in positions
+    max_exact = num_buckets // 2
+    is_small = relative_position < max_exact
+
+    # The other half of the buckets are for logarithmically bigger bins in positions up to max_distance
+    relative_position_if_large = max_exact + (
+        jnp.log(relative_position.astype(jnp.float32) / max_exact)
+        / math.log(max_distance / max_exact)
+        * (num_buckets - max_exact)
+    ).astype(jnp.int32)
+    relative_position_if_large = jnp.minimum(
+        # relative_position_if_large, jnp.full_like(relative_position_if_large, num_buckets - 1)
+        relative_position_if_large, num_buckets - 1
+    )
+
+    relative_buckets += jnp.where(is_small, relative_position, relative_position_if_large)
+    return relative_buckets
 
 
 class MultiheadLinearInit(param_init.DefaultInit):
@@ -57,7 +140,7 @@ class _BaseMultiheadLinear(Module):
 
     def _initialize_module_parameters(self, *, prng_key: jax.random.KeyArray) -> NestedParameters:
         cfg = self.config
-        params = NestedParameters(
+        params = dict(
             weight=self._initialize_parameter('weight', prng_key=prng_key,
                                               shape=(cfg.model_dim, cfg.num_heads, cfg.per_head_dim)))
         if cfg.bias:
@@ -154,7 +237,7 @@ class MultiheadAttention(Module):
                    'Config used for the Q,K,V projections.')
         cfg.define('output_linear', MultiheadOutputLinear.default_config(),
                    'Config used for the output projection.')
-        cfg.define('dropout', 0., 'If > 0, the dropout rate.')
+        cfg.define('dropout', Dropout.default_config(), 'The dropout layer.')
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Module):
@@ -165,8 +248,8 @@ class MultiheadAttention(Module):
             proj_cfg.model_dim = dim
             proj_cfg.num_heads = cfg.num_heads
             proj_cfg.per_head_dim = self.per_head_dim()
-            self.add_child(f'{name}_proj', proj_cfg)
-        self.add_child('dropout', cfg.dropout)
+            self._add_child(f'{name}_proj', proj_cfg)
+        self._add_child('dropout', cfg.dropout)
 
     def output_dim(self):
         cfg = self.config
@@ -203,16 +286,18 @@ class MultiheadAttention(Module):
             [batch, num_heads, target_length, source_length].
         """
         q_scale = self.per_head_dim() ** -0.5
-        q_proj = self.q_proj(query * q_scale)
+        q_proj = self.q_proj(query) * q_scale
         k_proj = self.k_proj(key)
         v_proj = self.v_proj(value)
         logits = jnp.einsum('btnh,bsnh->bnts', q_proj, k_proj)
+        # logging.info("MultiheadAttention.logits=%s", logits[0, 0, 0].reshape([-1]))
         if mask is not None and mask.ndim == 3:
             # [batch, 1, target_length, source_length].
             mask = mask[:, None, :, :]
         probs = masked_softmax(logits, mask=mask)
         probs = self.dropout(probs)
         context = jnp.einsum('bnts,bsnh->btnh', probs, v_proj)
+        logging.info("MultiheadAttention.context=%s", context[0, 0].reshape([-1]))
         # [batch, target_length, output_dim].
         outputs = self.o_proj(context)
         return self.Output(data=outputs, probs=probs)
@@ -226,21 +311,21 @@ class TransformerAttentionLayer(Module):
         cfg = super().default_config()
         cfg.define('target_dim', 0, 'Input target feature dim.')
         cfg.define('source_dim', 0, 'Input source feature dim.')
-        cfg.define('norm', RMSNorm.default_config(), 'The normalization layer config.')
+        cfg.define('norm', LayerNorm.default_config(), 'The normalization layer config.')
         cfg.define('attention', MultiheadAttention.default_config(), 'The attention layer config.')
         cfg.define('dropout', Dropout.default_config(), 'The dropout layer config.')
+        cfg.define('structure', 'prenorm',
+                   'The inner structure of the layer: prenorm or postnorm. '
+                   'See https://arxiv.org/abs/2002.04745 for background.')
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Module):
         super().__init__(cfg, parent=parent)
         cfg = self.config
-        if isinstance(cfg.norm, config_lib.Config):
-            self.add_child('norm', cfg.norm.set(dim=cfg.target_dim))
-        else:
-            self.norm = cfg.norm(cfg.target_dim)
-        self.add_child('attention', cfg.attention.set(
+        self._add_child('norm', cfg.norm.set(dim=cfg.target_dim))
+        self._add_child('attention', cfg.attention.set(
             query_dim=cfg.target_dim, key_dim=cfg.source_dim, value_dim=cfg.source_dim, output_dim=cfg.target_dim))
-        self.add_child('dropout', cfg.dropout)
+        self._add_child('dropout', cfg.dropout)
 
     @dataclass
     class Output:
@@ -262,12 +347,24 @@ class TransformerAttentionLayer(Module):
             An Output instance, where .data is of the same shape as target and .probs is of shape
             [batch, num_heads, target_length, source_length].
         """
-        skip_input = target  # pre-norm: where normalization happens within the residual part.
-        norm_target = self.norm(target)
-        if source is None:
-            source = norm_target  # self attention
-        atten_output = self.attention(query=norm_target, key=source, value=source, mask=mask)
-        data = skip_input + self.dropout(inputs=atten_output.data)
+        cfg = self.config
+        if cfg.structure == 'prenorm':
+            skip_input = target  # pre-norm: where normalization happens within the residual part.
+            norm_target = self.norm(target)
+            if source is None:
+                source = norm_target  # self attention
+            atten_output = self.attention(query=norm_target, key=source, value=source, mask=mask)
+            data = skip_input + self.dropout(atten_output.data)
+        elif cfg.structure == 'postnorm':
+            # This is the structure used by the original Transformer, BERT, and RoBERTa.
+            if source is None:
+                source = target  # self attention
+            atten_output = self.attention(query=target, key=source, value=source, mask=mask)
+            logging.info("atten_output=%s", atten_output.data[0, 0])
+            # Post-norm: norm applied on the sum of input and attention output.
+            data = self.norm(target + self.dropout(atten_output.data))
+        else:
+            raise NotImplementedError(cfg.structure)
         return self.Output(data=data, probs=atten_output.probs)
 
 
@@ -288,11 +385,11 @@ class TransformerFeedForwardLayer(Module):
     def __init__(self, cfg: config_lib.Config, *, parent: Module):
         super().__init__(cfg, parent=parent)
         cfg = self.config
-        self.add_child('norm', cfg.norm.set(dim=cfg.input_dim))
-        self.add_child('linear1', cfg.linear_tpl.set(input_dim=cfg.input_dim, output_dim=cfg.hidden_dim))
-        self.add_child('linear2', cfg.linear_tpl.set(input_dim=cfg.hidden_dim, output_dim=cfg.input_dim))
-        self.add_child('dropout1', cfg.dropout)
-        self.add_child('dropout2', cfg.dropout)
+        self._add_child('norm', cfg.norm.set(dim=cfg.input_dim))
+        self._add_child('linear1', cfg.linear_tpl.set(input_dim=cfg.input_dim, output_dim=cfg.hidden_dim))
+        self._add_child('linear2', cfg.linear_tpl.set(input_dim=cfg.hidden_dim, output_dim=cfg.input_dim))
+        self._add_child('dropout1', cfg.dropout)
+        self._add_child('dropout2', cfg.dropout)
 
     def forward(self, inputs: Tensor) -> Tensor:
         cfg = self.config
@@ -325,10 +422,10 @@ class TransformerLayer(Module):
     def __init__(self, cfg: config_lib.Config, *, parent: Module):
         super().__init__(cfg, parent=parent)
         cfg = self.config
-        self.add_child('self_attention', cfg.self_attention.set(target_dim=cfg.input_dim, source_dim=cfg.input_dim))
-        self.add_child('feed_forward', cfg.feed_forward.set(input_dim=cfg.input_dim))
+        self._add_child('self_attention', cfg.self_attention.set(target_dim=cfg.input_dim, source_dim=cfg.input_dim))
+        self._add_child('feed_forward', cfg.feed_forward.set(input_dim=cfg.input_dim))
         if cfg.cross_attention is not None:
-            self.add_child('cross_attention', cfg.cross_attention.set(target_dim=cfg.input_dim))
+            self._add_child('cross_attention', cfg.cross_attention.set(target_dim=cfg.input_dim))
 
     @dataclass
     class Output:
