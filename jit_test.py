@@ -10,7 +10,7 @@ def f(x):
 
 
 def f_from_stack():
-    print('f_from_stack')
+    print("f_from_stack")
     x = input_stack.pop(-1)
     return f(x)
 
@@ -24,8 +24,8 @@ def f_via_stack(x):
 
 # print(jax.jit(f)(jnp.ones((2, 4), dtype=jnp.float32)))
 print(jax.jit(f_via_stack)(jnp.ones((2, 4), dtype=jnp.float32)))
-print(f'output={output_queue}')
+print(f"output={output_queue}")
 print(jax.jit(f_via_stack)(jnp.zeros((2, 4), dtype=jnp.float32)))
-print(f'output={output_queue}')
+print(f"output={output_queue}")
 print(jax.jit(f_via_stack)(jnp.zeros((2, 3), dtype=jnp.float32)))
-print(f'output={output_queue}')
+print(f"output={output_queue}")

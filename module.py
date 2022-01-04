@@ -23,38 +23,41 @@ from jax import numpy as jnp
 import config as config_lib
 import param_init
 
-NestedParameters = Dict[str, Union[jnp.ndarray, 'NestedParameters']]
+NestedParameters = Dict[str, Union[jnp.ndarray, "NestedParameters"]]
 
 
 class OutputCollection:
     # Some standard collection names.
-    SUMMARY = 'summary'
-    PARAMETER_UPDATES = 'parameter_updates'
+    SUMMARY = "summary"
+    PARAMETER_UPDATES = "parameter_updates"
 
-    def __init__(self, outputs: Dict[str, Union[jnp.ndarray, 'OutputCollection']]):
+    def __init__(self, outputs: Dict[str, Union[jnp.ndarray, "OutputCollection"]]):
         self._outputs = outputs
 
     def add_value(self, name: str, value: jnp.ndarray):
         self._insert(name, value)
 
-    def add_child(self, name: str) -> 'OutputCollection':
+    def add_child(self, name: str) -> "OutputCollection":
         child = OutputCollection({})
         self._insert(name, child)
         return child
 
-    def _insert(self, name: str, value: Union[jnp.ndarray, 'OutputCollection']):
+    def _insert(self, name: str, value: Union[jnp.ndarray, "OutputCollection"]):
         if name in self._outputs:
-            raise ValueError(f'{name} already added')
+            raise ValueError(f"{name} already added")
         self._outputs[name] = value
 
 
 def standard_output_collections():
-    return {name: OutputCollection({}) for name in (OutputCollection.SUMMARY, OutputCollection.PARAMETER_UPDATES)}
+    return {
+        name: OutputCollection({})
+        for name in (OutputCollection.SUMMARY, OutputCollection.PARAMETER_UPDATES)
+    }
 
 
 @dataclass
 class InvocationContext:
-    module: 'Module'
+    module: "Module"
     parameters: NestedParameters
     is_training: bool
     prng_key: jax.random.KeyArray
@@ -66,24 +69,29 @@ class InvocationContext:
             k = field.name
             if k in override_kwargs:
                 kwargs[k] = override_kwargs[k]
-            elif k in ('module', 'is_training', 'prng_key'):
+            elif k in ("module", "is_training", "prng_key"):
                 kwargs[k] = getattr(self, k)
             else:
                 kwargs[k] = copy.deepcopy(getattr(self, k))
-        assert kwargs['module'] is self.module
+        assert kwargs["module"] is self.module
         return InvocationContext(**kwargs)
 
-    def add_child(self, name: str) -> 'InvocationContext':
+    def add_child(self, name: str) -> "InvocationContext":
         self.prng_key, child_key = jax.random.split(self.prng_key)
         if self.output_collections is None:
             child_output_collections = None
         else:
             child_output_collections = {
-                collection_name: collection.add_child(name) for collection_name, collection in
-                self.output_collections.items()
+                collection_name: collection.add_child(name)
+                for collection_name, collection in self.output_collections.items()
             }
-        return InvocationContext(module=getattr(self.module, name), is_training=self.is_training, prng_key=child_key,
-                                 parameters=self.parameters.get(name), output_collections=child_output_collections)
+        return InvocationContext(
+            module=getattr(self.module, name),
+            is_training=self.is_training,
+            prng_key=child_key,
+            parameters=self.parameters.get(name),
+            output_collections=child_output_collections,
+        )
 
 
 @dataclass
@@ -115,7 +123,7 @@ def set_current_context(context: InvocationContext):
 def root_context(context: InvocationContext):
     global _global_context_stack
     if _global_context_stack.stack:
-        raise ValueError('Already within a InvocationContext')
+        raise ValueError("Already within a InvocationContext")
     with set_current_context(context) as c:
         yield c
 
@@ -128,23 +136,28 @@ def child_context(name: str):
 
 
 class Module(config_lib.Configurable):
-
     @classmethod
     def default_config(cls):
         cfg = config_lib.InstantiableConfig(cls)
-        cfg.define('name', '', 'Name of this module.')
-        cfg.define('dtype', None,
-                   'If not None, the default parameter dtype. '
-                   'If None, inherits from the parent module.')
-        cfg.define('param_init', None,
-                   'If not None, parameter initialization config of this module. '
-                   'If None, inherits from the parent module.')
+        cfg.define("name", "", "Name of this module.")
+        cfg.define(
+            "dtype",
+            None,
+            "If not None, the default parameter dtype. "
+            "If None, inherits from the parent module.",
+        )
+        cfg.define(
+            "param_init",
+            None,
+            "If not None, parameter initialization config of this module. "
+            "If None, inherits from the parent module.",
+        )
         return cfg
 
-    def __init__(self, cfg: config_lib.Config, *, parent: Optional['Module']):
+    def __init__(self, cfg: config_lib.Config, *, parent: Optional["Module"]):
         super().__init__(cfg)
         if not cfg.name:
-            raise ValueError(f'Module must have a name: {cfg.debug_string()}')
+            raise ValueError(f"Module must have a name: {cfg.debug_string()}")
         self._parent = parent  # avoid adding parent to self._modules
         cfg = self.config
         if cfg.param_init is not None:
@@ -154,10 +167,10 @@ class Module(config_lib.Configurable):
         else:
             init = None
         self._param_init = init
-        self._children: Dict[str, 'Module'] = {}
+        self._children: Dict[str, "Module"] = {}
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith('_'):
+        if name.startswith("_"):
             try:
                 return self.__dict__[name]
             except KeyError:
@@ -175,10 +188,10 @@ class Module(config_lib.Configurable):
     def path(self):
         if self.parent is None:
             return self.config.name
-        return f'{self.parent.path()}.{self.config.name}'
+        return f"{self.parent.path()}.{self.config.name}"
 
     def __str__(self):
-        return f'{type(self)}@{self.path()}'
+        return f"{type(self)}@{self.path()}"
 
     def dtype(self):
         if self.config.dtype is not None:
@@ -188,27 +201,33 @@ class Module(config_lib.Configurable):
         return jnp.float32
 
     def param_init(self) -> param_init.Init:
-        init = getattr(self, '_param_init', None)
+        init = getattr(self, "_param_init", None)
         if init is not None:
             return init
         return self.parent.param_init()
 
-    def _add_child(self, name: str, child_config: config_lib.Config, **kwargs) -> 'Module':
-        if not re.fullmatch('^[a-z][a-z0-9_]*$', name):
+    def _add_child(
+        self, name: str, child_config: config_lib.Config, **kwargs
+    ) -> "Module":
+        if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
             raise ValueError(f'Invalid child name "{name}"')
         child_config = copy.deepcopy(child_config)
         if not issubclass(child_config.cls, Module):
-            raise TypeError(f'add_child expects a Module config, got {child_config}')
+            raise TypeError(f"add_child expects a Module config, got {child_config}")
         if child_config.name and child_config.name != name:
-            raise ValueError(f'child_config already has a different name: {child_config.name} vs. {name}')
+            raise ValueError(
+                f"child_config already has a different name: {child_config.name} vs. {name}"
+            )
         child_config.name = name
         module = child_config.freeze().instantiate(parent=self, **kwargs)
         if name in self._children:
-            raise ValueError(f'Child {name} already exists')
+            raise ValueError(f"Child {name} already exists")
         self._children[name] = module
         return module
 
-    def initialize_parameters_recursively(self, prng_key: jax.random.KeyArray) -> NestedParameters:
+    def initialize_parameters_recursively(
+        self, prng_key: jax.random.KeyArray
+    ) -> NestedParameters:
         prng_key, module_key = jax.random.split(prng_key)
         params = self._initialize_module_parameters(prng_key=module_key)
         for name, child in self._children.items():
@@ -217,11 +236,19 @@ class Module(config_lib.Configurable):
             params[name] = child.initialize_parameters_recursively(prng_key=child_key)
         return params
 
-    def _initialize_module_parameters(self, *, prng_key: jax.random.KeyArray) -> NestedParameters:
+    def _initialize_module_parameters(
+        self, *, prng_key: jax.random.KeyArray
+    ) -> NestedParameters:
         return {}
 
-    def _initialize_parameter(self, name: str, *, prng_key: jax.random.KeyArray, shape: Sequence[int],
-                              dtype: Optional[jnp.dtype] = None) -> jnp.ndarray:
+    def _initialize_parameter(
+        self,
+        name: str,
+        *,
+        prng_key: jax.random.KeyArray,
+        shape: Sequence[int],
+        dtype: Optional[jnp.dtype] = None,
+    ) -> jnp.ndarray:
         """Adds a parameter with the given name and shape.
 
         **kwargs will be passed to torch.emtpy(). If 'dtype' is not in kwargs, self.dtype() will be used.
@@ -236,8 +263,10 @@ class Module(config_lib.Configurable):
             The created parameter.
         """
         if name in self._children:
-            raise ValueError(f'Child {name} already exists.')
-        return self.param_init().initialize(name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype())
+            raise ValueError(f"Child {name} already exists.")
+        return self.param_init().initialize(
+            name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype()
+        )
 
     def make_invocation_context(self, **kwargs):
         return InvocationContext(module=self, **kwargs)
@@ -245,9 +274,9 @@ class Module(config_lib.Configurable):
     def get_invocation_context(self):
         context = current_context()
         if not context:
-            raise RuntimeError('Module invocation context not found')
+            raise RuntimeError("Module invocation context not found")
         if context.module is not self:
-            raise RuntimeError(f'Module mismatch: {context.module} vs. {self}')
+            raise RuntimeError(f"Module mismatch: {context.module} vs. {self}")
         return context
 
     @property
@@ -258,11 +287,15 @@ class Module(config_lib.Configurable):
     def parameters(self):
         return self.get_invocation_context().parameters
 
-    def __call__(self, *args, method='forward', context=None, **kwargs) -> Any:
+    def __call__(self, *args, method="forward", context=None, **kwargs) -> Any:
         if len(args) > 1:
-            logging.log_first_n(logging.WARNING,
-                                'Multiple positional arguments for %s.%s. Consider using keyword arguments instead.',
-                                3, type(self), method)
+            logging.log_first_n(
+                logging.WARNING,
+                "Multiple positional arguments for %s.%s. Consider using keyword arguments instead.",
+                3,
+                type(self),
+                method,
+            )
 
         f = lambda: getattr(self, method)(*args, **kwargs)
         if context is not None:
@@ -270,10 +303,12 @@ class Module(config_lib.Configurable):
                 return f()
         context = current_context()
         if context is None:
-            raise ValueError(f'context is required when {self} is invoked outside of an InvocationContext.')
+            raise ValueError(
+                f"context is required when {self} is invoked outside of an InvocationContext."
+            )
         if context.module is self:
             return f()
         if context.module is self.parent:
             with child_context(self.config.name):
                 return f()
-        raise ValueError('context.module does not match self')
+        raise ValueError("context.module does not match self")

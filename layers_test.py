@@ -27,21 +27,27 @@ def _copy(src: jnp.ndarray, dst: torch.nn.Parameter):
 
 
 class LayerTest(absltest.TestCase):
-
     def testLinear(self):
         input_dim, output_dim = 4, 6
-        cfg = Linear.default_config().set(name='test', input_dim=input_dim, output_dim=output_dim)
+        cfg = Linear.default_config().set(
+            name="test", input_dim=input_dim, output_dim=output_dim
+        )
         layer: Linear = cfg.instantiate(parent=None)
 
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
         layer_params = layer.initialize_parameters_recursively(init_key)
-        self.assertEqual(dict(weight=(input_dim, output_dim), bias=(output_dim,)), _shapes(layer_params))
-        bias = layer_params['bias']
+        self.assertEqual(
+            dict(weight=(input_dim, output_dim), bias=(output_dim,)),
+            _shapes(layer_params),
+        )
+        bias = layer_params["bias"]
         _assert_allclose(bias, jnp.zeros_like(bias))
         # Randomize bias.
-        layer_params['bias'] = jax.random.normal(jax.random.PRNGKey(45), shape=bias.shape, dtype=bias.dtype)
+        layer_params["bias"] = jax.random.normal(
+            jax.random.PRNGKey(45), shape=bias.shape, dtype=bias.dtype
+        )
 
         # Random inputs.
         prng_key, input_key = jax.random.split(prng_key)
@@ -49,20 +55,22 @@ class LayerTest(absltest.TestCase):
         inputs = orig_inputs.copy()
 
         # Compute layer outputs.
-        context = layer.make_invocation_context(is_training=True, parameters=layer_params, prng_key=prng_key)
+        context = layer.make_invocation_context(
+            is_training=True, parameters=layer_params, prng_key=prng_key
+        )
         outputs = layer(inputs, context=context)
 
         # Compute ref outputs.
         ref = torch.nn.Linear(in_features=input_dim, out_features=output_dim)
         # torch.nn.Linear.weight is of shape (output_dim, input_dim).
-        _copy(layer_params['weight'].transpose(), ref.weight)
-        _copy(layer_params['bias'], ref.bias)
+        _copy(layer_params["weight"].transpose(), ref.weight)
+        _copy(layer_params["bias"], ref.bias)
         ref_outputs = ref(torch.as_tensor(inputs))
         _assert_allclose(outputs, ref_outputs.detach().numpy())
 
     def testLayerNorm(self):
         dim = 6
-        cfg = LayerNorm.default_config().set(name='norm', dim=dim)
+        cfg = LayerNorm.default_config().set(name="norm", dim=dim)
         layer: LayerNorm = cfg.instantiate(parent=None)
 
         # Initialize layer parameters.
@@ -75,7 +83,9 @@ class LayerTest(absltest.TestCase):
         orig_inputs = jax.random.normal(input_key, [2, 3, dim])
         inputs = orig_inputs.copy()
 
-        context = layer.make_invocation_context(is_training=True, parameters=layer_params, prng_key=prng_key)
+        context = layer.make_invocation_context(
+            is_training=True, parameters=layer_params, prng_key=prng_key
+        )
         outputs = layer(inputs, context=context)
         # forward() should not mutate 'inputs' in-place.
         _assert_allclose(inputs, orig_inputs)
@@ -88,7 +98,7 @@ class LayerTest(absltest.TestCase):
 
         # Set scales to 2.
         layer_params2 = copy.deepcopy(layer_params)
-        layer_params2['scale'] *= 2
+        layer_params2["scale"] *= 2
         outputs = layer(inputs, context=context.clone(parameters=layer_params2))
         # The output mean should be close to 0.
         output_mean = outputs.mean(axis=-1, keepdims=True)
@@ -99,7 +109,7 @@ class LayerTest(absltest.TestCase):
 
     def testRMSNorm(self):
         dim = 6
-        cfg = RMSNorm.default_config().set(name='norm', dim=dim)
+        cfg = RMSNorm.default_config().set(name="norm", dim=dim)
         layer: RMSNorm = cfg.instantiate(parent=None)
 
         # Initialize layer parameters.
@@ -112,7 +122,9 @@ class LayerTest(absltest.TestCase):
         orig_inputs = jax.random.normal(input_key, [2, 3, dim])
         inputs = orig_inputs.copy()
 
-        context = layer.make_invocation_context(is_training=True, parameters=layer_params, prng_key=prng_key)
+        context = layer.make_invocation_context(
+            is_training=True, parameters=layer_params, prng_key=prng_key
+        )
         outputs = layer(inputs, context=context)
         # forward() should not mutate 'inputs' in-place.
         _assert_allclose(inputs, orig_inputs)
@@ -122,11 +134,11 @@ class LayerTest(absltest.TestCase):
 
         # Set scales to 2.
         layer_params2 = copy.deepcopy(layer_params)
-        layer_params2['scale'] *= 2
+        layer_params2["scale"] *= 2
         outputs = layer(inputs, context=context.clone(parameters=layer_params2))
         output_norm = jnp.sqrt((outputs ** 2).sum(axis=-1))
         # The output_norm should be close to 2 * sqrt(dim).
-        _assert_allclose(output_norm, np.ones_like(output_norm) * 2. * math.sqrt(dim))
+        _assert_allclose(output_norm, np.ones_like(output_norm) * 2.0 * math.sqrt(dim))
 
 
 if __name__ == "__main__":

@@ -63,7 +63,7 @@ class FrozenConfigError(RuntimeError):
 
 
 def validate_config_field_name(name: str) -> None:
-    if not re.fullmatch('^[a-z][a-z0-9_]*$', name):
+    if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
         raise InvalidConfigNameError(f'Invalid config field name "{name}"')
 
 
@@ -76,10 +76,14 @@ def validate_config_field_value(value: Any) -> None:
             validate_config_field_value(v)
     elif dataclasses.is_dataclass(value):
         validate_config_field_value(value.__dict__)
-    elif value is None or isinstance(value, (Config, type, int, float, str, enum.Enum, np.dtype)):
+    elif value is None or isinstance(
+        value, (Config, type, int, float, str, enum.Enum, np.dtype)
+    ):
         pass
     else:
-        raise InvalidConfigValueError(f'Invalid config value type {type(value)} for value "{value}"')
+        raise InvalidConfigValueError(
+            f'Invalid config value type {type(value)} for value "{value}"'
+        )
 
 
 def _is_named_tuple(x):
@@ -93,11 +97,10 @@ def _is_named_tuple(x):
     Args:
       x: The object to check.
     """
-    return isinstance(x, tuple) and hasattr(x, '_fields') and hasattr(x, '_asdict')
+    return isinstance(x, tuple) and hasattr(x, "_fields") and hasattr(x, "_asdict")
 
 
 class _ConfigField:
-
     def __init__(self, name, default_value, description):
         validate_config_field_name(name)
         validate_config_field_value(default_value)
@@ -130,7 +133,7 @@ class Config:
         self._fields = {}  # {str: _ConfigField}
         self._frozen = False
 
-    def freeze(self) -> 'Config':
+    def freeze(self) -> "Config":
         self._frozen = True
 
         def _enter(key: str, val: Any, default_sub_key_vals: List):
@@ -143,24 +146,26 @@ class Config:
 
     def define(self, name: str, default_value: Any, description: str) -> _ConfigField:
         if name in self._fields:
-            raise FieldAlreadyExistsError(f'Config field {name} already exists')
+            raise FieldAlreadyExistsError(f"Config field {name} already exists")
         field = _ConfigField(name, default_value, description)
         self._fields[name] = field
         return field
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name.startswith('_'):
+        if name.startswith("_"):
             self.__dict__[name] = value
         else:
             if self._frozen:
-                raise FrozenConfigError(f'Trying to modify a frozen config: {name}={value}')
+                raise FrozenConfigError(
+                    f"Trying to modify a frozen config: {name}={value}"
+                )
             try:
                 self._fields[name].set_value(value)
             except KeyError:
                 raise UnknownFieldError(self._key_error_string(name))
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith('_'):
+        if name.startswith("_"):
             try:
                 return self.__dict__[name]
             except KeyError:
@@ -189,27 +194,29 @@ class Config:
         """Returns (key, value) pairs sorted by keys."""
         return [(key, getattr(self, key)) for key in self.keys()]
 
-    def set(self, **kwargs) -> 'Config':
+    def set(self, **kwargs) -> "Config":
         for k, v in kwargs.items():
             setattr(self, k, v)
         return self
 
-    def debug_string(self, *, kv_separator=': ', field_separator='\n'):
+    def debug_string(self, *, kv_separator=": ", field_separator="\n"):
         lines = []
-        self.visit(lambda key, val: lines.append(f'{key}{kv_separator}{val}'))
-        prefix = 'Frozen!\n' if self._frozen else ''
+        self.visit(lambda key, val: lines.append(f"{key}{kv_separator}{val}"))
+        prefix = "Frozen!\n" if self._frozen else ""
         return prefix + field_separator.join(lines)
 
     def __str__(self):
         return self.debug_string()
 
     def __repr__(self):
-        return self.debug_string(kv_separator=':', field_separator='; ')
+        return self.debug_string(kv_separator=":", field_separator="; ")
 
-    def visit(self,
-              visit_fn: Callable[[str, Any], None],
-              enter_fn: Optional[Callable[[str, Any, Optional[List]], Optional[List]]] = None,
-              exit_fn: Optional[Callable[[str, Any], None]] = None):
+    def visit(
+        self,
+        visit_fn: Callable[[str, Any], None],
+        enter_fn: Optional[Callable[[str, Any, Optional[List]], Optional[List]]] = None,
+        exit_fn: Optional[Callable[[str, Any], None]] = None,
+    ):
         """Recursively visits objects within this Config instance.
 
         Visit can traverse Config, lists, tuples, dataclasses, and namedtuples.
@@ -259,22 +266,22 @@ class Config:
             if isinstance(val, Config):
                 return [(_sub_key(key, k), v) for k, v in val.items()]
             elif isinstance(val, dict):
-                return [(f'{key}[{k}]', v) for k, v in val.items()]
+                return [(f"{key}[{k}]", v) for k, v in val.items()]
             elif dataclasses.is_dataclass(val):
                 return _default_enter_fn(key, val.__dict__)
             elif _is_named_tuple(val):
                 return _default_enter_fn(key, val._asdict())
             elif isinstance(val, (list, tuple, range)):
-                return [(f'{key}[{i}]', v) for i, v in enumerate(val)]
+                return [(f"{key}[{i}]", v) for i, v in enumerate(val)]
             else:
                 return None  # do not enter 'val'
 
         def _sub_key(key, subkey):
             if key:
-                return f'{key}.{subkey}'
+                return f"{key}.{subkey}"
             return subkey
 
-        _visit('', self)
+        _visit("", self)
 
     def _similar_keys(self, name: str) -> List[str]:
         """Return a list of field keys that are similar to name."""
@@ -285,7 +292,7 @@ class Config:
             trials = 0
             for i in range(len(name) - 3):
                 trials += 1
-                if name[i:i + 3] in key:
+                if name[i : i + 3] in key:
                     matches += 1
             if trials:
                 return float(matches) / trials
@@ -297,23 +304,24 @@ class Config:
         similar = self._similar_keys(name)
         if similar:
             return f'{name} (did you mean: [{", ".join(sorted(similar))}])'
-        return f'{name} (keys are {self.keys()})'
+        return f"{name} (keys are {self.keys()})"
 
 
 class InstantiableConfig(Config):
-
     def __init__(self, cls: Optional[type] = None) -> None:
         super().__init__()
-        self.define('cls', cls, 'Cls that this Config object is associated with.')
+        self.define("cls", cls, "Cls that this Config object is associated with.")
 
     @staticmethod
     def for_class(cls):
         config = InstantiableConfig(cls)
         init_sig = inspect.signature(cls.__init__)
         for name, param in init_sig.parameters.items():
-            if name == 'self':
+            if name == "self":
                 continue
-            config.define(name, param.default, f'The argument {name} for {cls}.__init__().')
+            config.define(
+                name, param.default, f"The argument {name} for {cls}.__init__()."
+            )
         return config
 
     def instantiate(self, **kwargs) -> Any:
@@ -359,11 +367,10 @@ class InstantiableConfig(Config):
             return self.cls(self, **kwargs)
         else:
             # Initialize by passing config fields as kwargs.
-            return self.cls(**{k: v for k, v in self.items() if k != 'cls'}, **kwargs)
+            return self.cls(**{k: v for k, v in self.items() if k != "cls"}, **kwargs)
 
 
 class Configurable:
-
     @classmethod
     def default_config(cls):
         cfg = InstantiableConfig(cls)
