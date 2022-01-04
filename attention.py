@@ -444,9 +444,15 @@ class TransformerFeedForwardLayer(Module):
             Linear.default_config(),
             "Whether the linear modules have biases.",
         )
-        cfg.define("norm", RMSNorm.default_config(), "The normalization layer config.")
-        cfg.define("activation", "jnp.relu", "The activation function.")
+        cfg.define("norm", LayerNorm.default_config(), "The normalization layer config.")
+        cfg.define("activation", "nn.relu", "The activation function.")
         cfg.define("dropout", Dropout.default_config(), "The dropout layer config.")
+        cfg.define(
+            "structure",
+            "prenorm",
+            "The inner structure of the layer: prenorm or postnorm. "
+            "See https://arxiv.org/abs/2002.04745 for background.",
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Module):
@@ -466,13 +472,23 @@ class TransformerFeedForwardLayer(Module):
 
     def forward(self, inputs: Tensor) -> Tensor:
         cfg = self.config
-        x = self.norm(inputs)
-        x = self.linear1(x)
-        x = get_activation_fn(cfg.activation)(x)
-        x = self.dropout1(x)
-        x = self.linear2(x)
-        x = self.dropout2(x)
-        return inputs + x
+        if cfg.structure == "prenorm":
+            x = self.norm(inputs)
+            x = self.linear1(x)
+            x = get_activation_fn(cfg.activation)(x)
+            x = self.dropout1(x)
+            x = self.linear2(x)
+            x = self.dropout2(x)
+            x += inputs
+        elif cfg.structure == "postnorm":
+            x = self.linear1(inputs)
+            x = get_activation_fn(cfg.activation)(x)
+            x = self.linear2(x)
+            x = self.dropout1(x)
+            x = self.norm(x + inputs)
+        else:
+            raise NotImplementedError(cfg.structure)
+        return x
 
 
 class TransformerLayer(Module):
