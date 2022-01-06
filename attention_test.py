@@ -223,9 +223,9 @@ def _parameters_from_roberta_attention(src: hf_roberta.RobertaAttention):
     per_head_dim = src.self.attention_head_size
     results = {"attention": {}}
     for src_proj, dst_proj in (
-            ("query", "q_proj"),
-            ("key", "k_proj"),
-            ("value", "v_proj"),
+        ("query", "q_proj"),
+        ("key", "k_proj"),
+        ("value", "v_proj"),
     ):
         dense = getattr(src.self, src_proj)
         # Note that torch.nn.Linear.weight is (output_dim, input_dim), so we need to transpose it before reshaping.
@@ -247,20 +247,27 @@ def _parameters_from_dense(dense: torch.nn.Linear):
     return _to_jtensor(dict(weight=dense.weight.transpose(0, 1), bias=dense.bias))
 
 
-def _parameters_from_roberta_feed_forward(intermediate: hf_roberta.RobertaIntermediate,
-                                          output: hf_roberta.RobertaOutput):
-    return _to_jtensor(dict(
-        linear1=_parameters_from_dense(intermediate.dense),
-        linear2=_parameters_from_dense(output.dense),
-        norm=_parameters_from_layer_norm(output.LayerNorm)
-    ))
+def _parameters_from_roberta_feed_forward(
+    intermediate: hf_roberta.RobertaIntermediate, output: hf_roberta.RobertaOutput
+):
+    return _to_jtensor(
+        dict(
+            linear1=_parameters_from_dense(intermediate.dense),
+            linear2=_parameters_from_dense(output.dense),
+            norm=_parameters_from_layer_norm(output.LayerNorm),
+        )
+    )
 
 
 def _parameters_from_roberta_layer(src: hf_roberta.RobertaLayer):
-    return _to_jtensor(dict(
-        self_attention=_parameters_from_roberta_attention(src.attention),
-        feed_forward=_parameters_from_roberta_feed_forward(src.intermediate, src.output),
-    ))
+    return _to_jtensor(
+        dict(
+            self_attention=_parameters_from_roberta_attention(src.attention),
+            feed_forward=_parameters_from_roberta_feed_forward(
+                src.intermediate, src.output
+            ),
+        )
+    )
 
 
 def _as_torch_tensor(src: jnp.ndarray):
@@ -270,7 +277,7 @@ def _as_torch_tensor(src: jnp.ndarray):
 def _copy_parameters(src: Module, dst: Module):
     with jnp.no_grad():
         for (src_name, src_param), (dst_name, dst_param) in zip(
-                src.named_parameters(), dst.named_parameters()
+            src.named_parameters(), dst.named_parameters()
         ):
             assert src_name == dst_name, f"{src_name} != {dst_name}"
             dst_param.copy_(src_param)
@@ -294,9 +301,8 @@ def _copy_transformer_parameters(src: Module, dst: attention.TransformerLayer):
 
 
 class TransformerTest(absltest.TestCase):
-
     def _compare_against_roberta_attention(
-            self, ref: hf_roberta.RobertaAttention, layer: TransformerAttentionLayer
+        self, ref: hf_roberta.RobertaAttention, layer: TransformerAttentionLayer
     ):
         layer_params = layer.initialize_parameters_recursively(
             prng_key=jax.random.PRNGKey(0)
@@ -353,7 +359,7 @@ class TransformerTest(absltest.TestCase):
         self._compare_against_roberta_attention(ref, layer)
 
     def _compare_against_roberta_layer(
-            self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer
+        self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer
     ):
         layer_params = layer.initialize_parameters_recursively(
             prng_key=jax.random.PRNGKey(0)
@@ -362,7 +368,10 @@ class TransformerTest(absltest.TestCase):
         print(f"layer parameters={layer_param_shapes}")
         layer_params = _parameters_from_roberta_layer(ref)
         batch_size, tgt_len = 2, 6
-        model_dim, num_heads = layer.config.input_dim, layer.config.self_attention.attention.num_heads
+        model_dim, num_heads = (
+            layer.config.input_dim,
+            layer.config.self_attention.attention.num_heads,
+        )
         rng = np.random.default_rng(seed=123)
         target = rng.random([batch_size, tgt_len, model_dim], dtype=np.float32)
         null_mask = jnp.zeros([tgt_len, tgt_len])
@@ -376,13 +385,20 @@ class TransformerTest(absltest.TestCase):
                 prng_key=jax.random.PRNGKey(0),
             )
             layer_outputs: TransformerLayer.Output = layer(
-                jnp.asarray(target),
-                self_attention_mask=mask,
-                context=context
+                jnp.asarray(target), self_attention_mask=mask, context=context
             )
-            logging.info('Auxiliary outputs=%s', context.output_collection.get_values_recursively())
-            logging.info('Summary=%s', _shapes(
-                context.output_collection.get_values_recursively(module.OutputCollection.SECTION_SUMMARY)))
+            logging.info(
+                "Auxiliary outputs=%s",
+                context.output_collection.get_values_recursively(),
+            )
+            logging.info(
+                "Summary=%s",
+                _shapes(
+                    context.output_collection.get_values_recursively(
+                        module.OutputCollection.SECTION_SUMMARY
+                    )
+                ),
+            )
             attn_mask = None if mask is None else _as_torch_tensor(mask)
             (ref_outputs,) = ref.forward(
                 torch.as_tensor(target, dtype=torch.float32),
@@ -396,8 +412,11 @@ class TransformerTest(absltest.TestCase):
         num_heads = 4
         cfg = TransformerLayer.default_config().set(name="test", input_dim=model_dim)
         cfg.self_attention.set(structure="postnorm")
-        cfg.feed_forward.set(structure="postnorm", activation='nn.silu')
+        cfg.feed_forward.set(structure="postnorm", activation="nn.silu")
+        cfg.feed_forward.linear.set(bias=True)
         cfg.self_attention.attention.set(num_heads=num_heads)
+        cfg.self_attention.attention.input_linear.set(bias=True)
+        cfg.self_attention.attention.output_linear.set(bias=True)
         layer: TransformerLayer = cfg.instantiate(parent=None)
         roberta_config = hf_roberta.RobertaConfig(
             hidden_size=model_dim,
@@ -406,7 +425,7 @@ class TransformerTest(absltest.TestCase):
             hidden_dropout_prob=0,
             classifier_dropout=0,
             # Jax's gelu uses an approximation by default and is slightly different from torch.nn.gelu.
-            hidden_act='silu',
+            hidden_act="silu",
         )
         print("roberta_config=%s" % roberta_config)
         ref = hf_roberta.RobertaLayer(roberta_config)

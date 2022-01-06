@@ -42,10 +42,12 @@ class OutputCollection:
         if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
             raise ValueError(f'Invalid name "{name}"')
         if name in self._all_names:
-            raise ValueError(f'{name} already added as a child or output')
+            raise ValueError(f"{name} already added as a child or output")
         self._all_names.add(name)
 
-    def add_value(self, name: str, value: jnp.ndarray, *, section: str=SECTION_DEFAULT):
+    def add_value(
+        self, name: str, value: jnp.ndarray, *, section: str = SECTION_DEFAULT
+    ):
         self._check_name(name)
         if section not in self._sections:
             self._sections[section] = {}
@@ -56,7 +58,9 @@ class OutputCollection:
         self._children[name] = OutputCollection()
         return self._children[name]
 
-    def get_values_recursively(self, section: str=SECTION_DEFAULT) -> Dict[str, Union[jnp.ndarray, dict]]:
+    def get_values_recursively(
+        self, section: str = SECTION_DEFAULT
+    ) -> Dict[str, Union[jnp.ndarray, dict]]:
         results = {}
         if section in self._sections:
             results.update(self._sections[section])
@@ -96,6 +100,16 @@ class InvocationContext:
             prng_key=child_key,
             parameters=self.parameters.get(name),
             output_collection=self.output_collection.add_child(name),
+        )
+
+    def get_summaries(self):
+        return self.output_collection.get_values_recursively(
+            OutputCollection.SECTION_SUMMARY
+        )
+
+    def get_parameter_updates(self):
+        return self.output_collection.get_values_recursively(
+            OutputCollection.SECTION_PARAMETER_UPDATE
         )
 
 
@@ -274,7 +288,9 @@ class Module(config_lib.Configurable):
         )
 
     def make_invocation_context(self, **kwargs):
-        return InvocationContext(module=self, output_collection=OutputCollection(), **kwargs)
+        return InvocationContext(
+            module=self, output_collection=OutputCollection(), **kwargs
+        )
 
     def get_invocation_context(self):
         context = current_context()
@@ -294,11 +310,13 @@ class Module(config_lib.Configurable):
 
     def add_summary(self, name: str, value: jnp.ndarray):
         return self.get_invocation_context().output_collection.add_value(
-            name, value, section=OutputCollection.SECTION_SUMMARY)
+            name, value, section=OutputCollection.SECTION_SUMMARY
+        )
 
     def add_parameter_update(self, name: str, value: jnp.ndarray):
         return self.get_invocation_context().output_collection.add_value(
-            name, value, section=OutputCollection.SECTION_PARAMETER_UPDATE)
+            name, value, section=OutputCollection.SECTION_PARAMETER_UPDATE
+        )
 
     def __call__(self, *args, method="forward", context=None, **kwargs) -> Any:
         if len(args) > 1:

@@ -333,7 +333,7 @@ class MultiheadAttention(Module):
             mask = mask[:, None, :, :]
         probs = masked_softmax(logits, mask=mask)
         probs = self.dropout(probs)
-        self.add_summary('atten_probs', probs)
+        self.add_summary("atten_probs", probs)
         context = jnp.einsum("bnts,bsnh->btnh", probs, v_proj)
         # logging.info("MultiheadAttention.context=%s", context[0, 0].reshape([-1]))
         # [batch, target_length, output_dim].
@@ -441,11 +441,11 @@ class TransformerFeedForwardLayer(Module):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("hidden_dim", 0, "The hidden dim.")
         cfg.define(
-            "linear_tpl",
-            Linear.default_config(),
-            "Whether the linear modules have biases.",
+            "linear", Linear.default_config(), "The linear layer config template."
         )
-        cfg.define("norm", LayerNorm.default_config(), "The normalization layer config.")
+        cfg.define(
+            "norm", LayerNorm.default_config(), "The normalization layer config."
+        )
         cfg.define("activation", "nn.relu", "The activation function.")
         cfg.define("dropout", Dropout.default_config(), "The dropout layer config.")
         cfg.define(
@@ -462,11 +462,11 @@ class TransformerFeedForwardLayer(Module):
         self._add_child("norm", cfg.norm.set(dim=cfg.input_dim))
         self._add_child(
             "linear1",
-            cfg.linear_tpl.set(input_dim=cfg.input_dim, output_dim=cfg.hidden_dim),
+            cfg.linear.set(input_dim=cfg.input_dim, output_dim=cfg.hidden_dim),
         )
         self._add_child(
             "linear2",
-            cfg.linear_tpl.set(input_dim=cfg.hidden_dim, output_dim=cfg.input_dim),
+            cfg.linear.set(input_dim=cfg.hidden_dim, output_dim=cfg.input_dim),
         )
         if cfg.structure == "prenorm":
             self._add_child("dropout1", cfg.dropout)

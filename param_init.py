@@ -92,11 +92,11 @@ class DefaultInit(Init):
     def _calculate_fan_in_and_fan_out(self, name: str, shape: Shape) -> Tuple[int, int]:
         if len(shape) < 2:
             raise NotImplementedError(f"Unsupported weight shape {shape} for {name}")
-        output_dim = shape[0]
-        input_dim = shape[1]
+        output_dim = shape[-1]
+        input_dim = shape[-2]
         receptive_field_size = 1
         if len(shape) > 2:
-            for s in shape[2:]:
+            for s in shape[:-2]:
                 receptive_field_size *= s
         fan_in = input_dim * receptive_field_size
         fan_out = output_dim * receptive_field_size
