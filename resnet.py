@@ -196,7 +196,13 @@ class ResNetModel(Module):
         cfg.param_init.set(fan="fan_out", distribution="normal", gain=math.sqrt(2))
         return cfg
 
-    def __init__(self, cfg: config_lib.Config, *, parent: Module):
+    @classmethod
+    def resnet18_config(cls):
+        cfg = cls.default_config()
+        cfg.num_blocks_per_stage = [2, 2, 2, 2]
+        return cfg
+
+    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         hidden_dim = cfg.hidden_dim
@@ -229,9 +235,9 @@ class ResNetModel(Module):
             ),
         )
 
-    def forward(self, images: Tensor, labels: Tensor) -> Tensor:
+    def forward(self, image: Tensor, label: Tensor) -> Tensor:
         cfg = self.config
-        x = self.conv1(images)
+        x = self.conv1(image)
         x = self.norm1(x)
         x = jax.nn.relu(x)
         x = jax.lax.reduce_window(
@@ -249,9 +255,9 @@ class ResNetModel(Module):
         # [batch, num_classes].
         logits = self.fc(x)
         # [batch, num_classes].
-        label_onehot = jax.nn.one_hot(labels, cfg.num_classes, dtype=logits.dtype)
+        label_onehot = jax.nn.one_hot(label, cfg.num_classes, dtype=logits.dtype)
         # [batch].
         per_example_loss = jnp.sum(label_onehot * jax.nn.log_softmax(logits), axis=-1)
         # Scalar.
         loss = jnp.mean(per_example_loss)
-        return loss, logits
+        return loss, {}

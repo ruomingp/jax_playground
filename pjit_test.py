@@ -10,7 +10,7 @@ import numpy as np
 print(jax.__version__)
 print(jax.devices())
 
-mesh_shape = (4, 2)
+mesh_shape = (4, 2) if len(jax.devices()) == 8 else (1, 1)
 devices = mesh_utils.create_device_mesh(mesh_shape)
 mesh = maps.Mesh(devices, ("data", "model"))
 print(mesh)

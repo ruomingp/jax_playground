@@ -46,7 +46,7 @@ class OutputCollection:
         self._all_names.add(name)
 
     def add_value(
-        self, name: str, value: jnp.ndarray, *, section: str = SECTION_DEFAULT
+            self, name: str, value: Any, *, section: str = SECTION_DEFAULT
     ):
         self._check_name(name)
         if section not in self._sections:
@@ -59,7 +59,7 @@ class OutputCollection:
         return self._children[name]
 
     def get_values_recursively(
-        self, section: str = SECTION_DEFAULT
+            self, section: str = SECTION_DEFAULT
     ) -> Dict[str, Union[jnp.ndarray, dict]]:
         results = {}
         if section in self._sections:
@@ -212,21 +212,8 @@ class Module(config_lib.Configurable):
     def __str__(self):
         return f"{type(self)}@{self.path()}"
 
-    def dtype(self):
-        if self.config.dtype is not None:
-            return self.config.dtype
-        if self.parent is not None:
-            return self.parent.dtype()
-        return jnp.float32
-
-    def param_init(self) -> param_init.Init:
-        init = getattr(self, "_param_init", None)
-        if init is not None:
-            return init
-        return self.parent.param_init()
-
     def _add_child(
-        self, name: str, child_config: config_lib.Config, **kwargs
+            self, name: str, child_config: config_lib.Config, **kwargs
     ) -> "Module":
         if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
             raise ValueError(f'Invalid child name "{name}"')
@@ -243,49 +230,6 @@ class Module(config_lib.Configurable):
             raise ValueError(f"Child {name} already exists")
         self._children[name] = module
         return module
-
-    def initialize_parameters_recursively(
-        self, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
-        prng_key, module_key = jax.random.split(prng_key)
-        params = self._initialize_module_parameters(prng_key=module_key)
-        for name, child in self._children.items():
-            assert name not in params
-            prng_key, child_key = jax.random.split(prng_key)
-            params[name] = child.initialize_parameters_recursively(prng_key=child_key)
-        return params
-
-    def _initialize_module_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
-        return {}
-
-    def _initialize_parameter(
-        self,
-        name: str,
-        *,
-        prng_key: jax.random.KeyArray,
-        shape: Sequence[int],
-        dtype: Optional[jnp.dtype] = None,
-    ) -> jnp.ndarray:
-        """Adds a parameter with the given name and shape.
-
-        **kwargs will be passed to torch.emtpy(). If 'dtype' is not in kwargs, self.dtype() will be used.
-
-        Args:
-            name: The parameter name.
-            prng_key: The pseudo random generator key.
-            shape: The parameter shape.
-            dtype: The parameter data type.
-
-        Returns:
-            The created parameter.
-        """
-        if name in self._children:
-            raise ValueError(f"Child {name} already exists.")
-        return self.param_init().initialize(
-            name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype()
-        )
 
     def make_invocation_context(self, **kwargs):
         return InvocationContext(
@@ -343,3 +287,62 @@ class Module(config_lib.Configurable):
             with child_context(self.config.name):
                 return f()
         raise ValueError("context.module does not match self")
+
+
+class BaseLayer(Module):
+
+    def dtype(self):
+        if self.config.dtype is not None:
+            return self.config.dtype
+        if self.parent is not None:
+            return self.parent.dtype()
+        return jnp.float32
+
+    def param_init(self) -> param_init.Init:
+        init = getattr(self, "_param_init", None)
+        if init is not None:
+            return init
+        return self.parent.param_init()
+
+    def initialize_parameters_recursively(
+        self, prng_key: jax.random.KeyArray
+    ) -> NestedParameters:
+        prng_key, module_key = jax.random.split(prng_key)
+        params = self._initialize_layer_parameters(prng_key=module_key)
+        for name, child in self._children.items():
+            assert name not in params
+            prng_key, child_key = jax.random.split(prng_key)
+            params[name] = child.initialize_parameters_recursively(prng_key=child_key)
+        return params
+
+    def _initialize_layer_parameters(
+        self, *, prng_key: jax.random.KeyArray
+    ) -> NestedParameters:
+        return {}
+
+    def _initialize_parameter(
+        self,
+        name: str,
+        *,
+        prng_key: jax.random.KeyArray,
+        shape: Sequence[int],
+        dtype: Optional[jnp.dtype] = None,
+    ) -> jnp.ndarray:
+        """Adds a parameter with the given name and shape.
+
+        **kwargs will be passed to torch.emtpy(). If 'dtype' is not in kwargs, self.dtype() will be used.
+
+        Args:
+            name: The parameter name.
+            prng_key: The pseudo random generator key.
+            shape: The parameter shape.
+            dtype: The parameter data type.
+
+        Returns:
+            The created parameter.
+        """
+        if name in self._children:
+            raise ValueError(f"Child {name} already exists.")
+        return self.param_init().initialize(
+            name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype()
+        )

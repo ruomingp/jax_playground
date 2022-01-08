@@ -4,8 +4,7 @@ import jax
 from jax import nn
 from jax import numpy as jnp
 
-import module
-from module import Module, NestedParameters
+from module import BaseLayer, NestedParameters
 
 Tensor = jnp.ndarray
 
@@ -28,7 +27,7 @@ def check_numerics(x: Tensor, msg_fmt: str = "", **msg_kwargs):
     return x
 
 
-class Dropout(Module):
+class Dropout(BaseLayer):
     """The dropout layer."""
 
     @classmethod
@@ -37,7 +36,7 @@ class Dropout(Module):
         cfg.define("rate", 0, "The dropout rate (i.e., 1 - keep_prob).")
         return cfg
 
-    def _initialize_module_parameters(
+    def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         return {}
@@ -48,12 +47,12 @@ class Dropout(Module):
             return x
         assert 0 < cfg.rate < 1
         dropout = jax.random.bernoulli(
-            module.current_context().prng_key, p=cfg.rate, shape=x.shape
+            BaseLayer.current_context().prng_key, p=cfg.rate, shape=x.shape
         )
         return jnp.where(dropout, jnp.zeros_like(x), x / (1.0 - cfg.rate))
 
 
-class LayerNorm(Module):
+class LayerNorm(BaseLayer):
     """Reference:"""
 
     @classmethod
@@ -63,7 +62,7 @@ class LayerNorm(Module):
         cfg.define("eps", 1e-8, "The epsilon.")
         return cfg
 
-    def _initialize_module_parameters(
+    def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         cfg = self.config
@@ -84,7 +83,7 @@ class LayerNorm(Module):
         return x
 
 
-class RMSNorm(Module):
+class RMSNorm(BaseLayer):
     """Reference: https://github.com/bzhangGo/rmsnorm."""
 
     @classmethod
@@ -94,7 +93,7 @@ class RMSNorm(Module):
         cfg.define("eps", 1e-8, "The epsilon.")
         return cfg
 
-    def _initialize_module_parameters(
+    def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         cfg = self.config
@@ -111,7 +110,7 @@ class RMSNorm(Module):
         return x
 
 
-class BatchNorm(Module):
+class BatchNorm(BaseLayer):
     """Reference:"""
 
     @classmethod
@@ -122,7 +121,7 @@ class BatchNorm(Module):
         cfg.define("eps", 1e-8, "The epsilon.")
         return cfg
 
-    def _initialize_module_parameters(
+    def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         cfg = self.config
@@ -137,7 +136,7 @@ class BatchNorm(Module):
         cfg = self.config
         x_dtype = x.dtype
         x = x.astype(jnp.float32)
-        reduction_axis = list(range(x.ndim - 1))
+        reduction_axis = tuple(range(x.ndim - 1))
         if self.is_training:
             mean = jnp.mean(x, axis=reduction_axis, keepdims=True)
             variance = jnp.mean((x - mean) ** 2, axis=reduction_axis, keepdims=True)
@@ -159,7 +158,7 @@ class BatchNorm(Module):
         return x
 
 
-class Linear(Module):
+class Linear(BaseLayer):
     """The linear layer."""
 
     @classmethod
@@ -170,7 +169,7 @@ class Linear(Module):
         cfg.define("bias", True, "Whether to add a bias.")
         return cfg
 
-    def _initialize_module_parameters(
+    def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         cfg = self.config
@@ -187,7 +186,7 @@ class Linear(Module):
         return x @ self.parameters["weight"] + self.parameters.get("bias", 0)
 
 
-class Conv2D(Module):
+class Conv2D(BaseLayer):
     """The 2-D convolution layer.
 
     Kernel weights have the HWIO layout and in the shape of (window[0], window[1], input_dim, output_dim).
@@ -207,7 +206,7 @@ class Conv2D(Module):
         cfg.define("bias", True, "Whether to add a bias.")
         return cfg
 
-    def _initialize_module_parameters(
+    def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         cfg = self.config

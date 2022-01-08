@@ -37,6 +37,7 @@ import dataclasses
 import enum
 import inspect
 import re
+import types
 from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
@@ -77,7 +78,7 @@ def validate_config_field_value(value: Any) -> None:
     elif dataclasses.is_dataclass(value):
         validate_config_field_value(value.__dict__)
     elif value is None or isinstance(
-        value, (Config, type, int, float, str, enum.Enum, np.dtype)
+        value, (Config, type, types.FunctionType, int, float, str, enum.Enum, np.dtype)
     ):
         pass
     else:
@@ -321,6 +322,16 @@ class InstantiableConfig(Config):
                 continue
             config.define(
                 name, param.default, f"The argument {name} for {cls}.__init__()."
+            )
+        return config
+
+    @staticmethod
+    def for_function(fn):
+        config = InstantiableConfig(cls=fn)
+        init_sig = inspect.signature(fn)
+        for name, param in init_sig.parameters.items():
+            config.define(
+                name, param.default, f"The argument {name} for {fn}()."
             )
         return config
 

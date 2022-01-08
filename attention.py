@@ -3,13 +3,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 import jax
-from absl import logging
 from jax import numpy as jnp
 
 import config as config_lib
 import param_init
 from layers import check_numerics, LayerNorm, Dropout, Linear, get_activation_fn
-from module import Module, NestedParameters
+from module import BaseLayer, Module, NestedParameters
 
 Tensor = jnp.ndarray
 
@@ -24,7 +23,7 @@ def make_causal_mask(seq_len: int) -> Tensor:
         A boolean tensor of shape [seq_len, seq_len] where the value at [i, j] = False if i >= j.
     """
     indexes = jnp.arange(seq_len)
-    return indexes[:, None] < indexes[None, :]
+    return jax.lax.lt(indexes[:, None], indexes[None, :])
 
 
 def make_segment_mask(*, source_segments: Tensor, target_segments: Tensor) -> Tensor:
@@ -42,7 +41,7 @@ def make_segment_mask(*, source_segments: Tensor, target_segments: Tensor) -> Te
     """
     target_segments = jnp.expand_dims(target_segments, -1)
     source_segments = jnp.expand_dims(source_segments, -2)
-    return source_segments != target_segments
+    return jax.lax.ne(source_segments, target_segments)
 
 
 def t5_relative_position_bucket(
@@ -128,7 +127,7 @@ class MultiheadLinearInit(param_init.DefaultInit):
             raise NotImplementedError(f"Unknown linear type ({cfg.type})")
 
 
-class _BaseMultiheadLinear(Module):
+class _BaseMultiheadLinear(BaseLayer):
     """The linear layer used for multi-head attention.
 
     It uses einsum for efficient computation on TPU to avoid reshaping.
@@ -147,7 +146,7 @@ class _BaseMultiheadLinear(Module):
         cfg.param_init = MultiheadLinearInit.default_config().set(type=linear_type)
         return cfg
 
-    def _initialize_module_parameters(
+    def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         cfg = self.config
@@ -230,7 +229,7 @@ def masked_softmax(logits: Tensor, mask: Optional[Tensor] = None):
     return probs
 
 
-class MultiheadAttention(Module):
+class MultiheadAttention(BaseLayer):
     """A basic multi-head attention layer.
 
     Differences from jnp.nn.MultiheadAttention:
@@ -341,7 +340,7 @@ class MultiheadAttention(Module):
         return self.Output(data=outputs, probs=probs)
 
 
-class TransformerAttentionLayer(Module):
+class TransformerAttentionLayer(BaseLayer):
     """A Transformer attention layer that can be used for either self-attention or cross-attention."""
 
     @classmethod
@@ -432,7 +431,7 @@ class TransformerAttentionLayer(Module):
         return self.Output(data=data, probs=atten_output.probs)
 
 
-class TransformerFeedForwardLayer(Module):
+class TransformerFeedForwardLayer(BaseLayer):
     """A Transformer feed-forward layer."""
 
     @classmethod
@@ -495,7 +494,7 @@ class TransformerFeedForwardLayer(Module):
         return x
 
 
-class TransformerLayer(Module):
+class TransformerLayer(BaseLayer):
     """A Transformer layer.
 
     Unlike jnp.nn.TransformerLayer, this allows components to be customized, e.g., replacing vanilla attention with

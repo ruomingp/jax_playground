@@ -2,6 +2,8 @@ import collections
 import copy
 import dataclasses
 
+from jax import numpy as jnp
+import tensorflow_datasets as tfds
 import numpy as np
 from absl.testing import absltest
 
@@ -27,12 +29,8 @@ class ConfigTest(absltest.TestCase):
         # Field name cannot contain '.'.
         with self.assertRaisesRegex(config.InvalidConfigNameError, "hidden.dim"):
             cfg.define("hidden.dim", 10, "The hidden dimension.")
-        # Field value cannot be a function.
-        with self.assertRaisesRegex(
-            config.InvalidConfigValueError,
-            "Invalid config value type <class 'function'>",
-        ):
-            cfg.define("hidden_dim", lambda: 10, "The hidden dimension.")
+        # Field value can be a function.
+        cfg.define("func", lambda x: jnp.maximum(x, 0), "The activation function.")
 
     def testSet(self):
         cfg = config.Config()
@@ -52,12 +50,12 @@ class ConfigTest(absltest.TestCase):
         )
         # UnknownFieldError.
         with self.assertRaisesRegex(
-            config.UnknownFieldError, r"keys are \['hidden_dim', 'num_layers'\].*"
+                config.UnknownFieldError, r"keys are \['hidden_dim', 'num_layers'\].*"
         ):
             cfg.vocab_size = 1024
         # When the unknown field is close enough to a defined field.
         with self.assertRaisesRegex(
-            config.UnknownFieldError, r".*did you mean: \[num_layers\].*"
+                config.UnknownFieldError, r".*did you mean: \[num_layers\].*"
         ):
             cfg.num_layer = 5
 
@@ -222,6 +220,12 @@ class ConfigTest(absltest.TestCase):
             return [(name, param.shape) for name, param in layer.named_parameters()]
 
         self.assertEqual(param_shapes(layer1), param_shapes(layer2))
+
+    def testInstantiableConfigFromFunctionSignature(self):
+        cfg = config.InstantiableConfig.for_function(tfds.load)
+        self.assertContainsSubset(
+            {"cls", "name", "split", "download"}, cfg.keys()
+        )
 
 
 if __name__ == "__main__":
