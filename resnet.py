@@ -4,7 +4,6 @@ from typing import Optional
 
 import jax.nn
 from jax import numpy as jnp
-import flax
 
 import config as config_lib
 import layers
@@ -258,7 +257,6 @@ class ResNetModel(BaseLayer):
         x = self.norm1(x)
         x = jax.nn.relu(x)
         x = jax.lax.reduce_window(x, init_value=-jnp.inf, computation=jax.lax.max, window_dimensions=(1, 3, 3, 1), window_strides=(1, 2, 2, 1), padding=((0, 0), (1, 1), (1, 1), (0, 0)))
-        # x = flax.linen.max_pool(x, window_shape=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)))
         for stage_i, num_blocks in enumerate(cfg.num_blocks_per_stage):
             x = getattr(self, f"stage{stage_i}")(x)
         # [batch, hidden].

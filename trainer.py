@@ -62,15 +62,20 @@ class SpmdTrainer(Module):
             return _TrainerState(model=model_params, learner=learner_params)
 
         # TODO(ruoming): support state sharding.
-        self._state = self._pjit(init_state, in_axis_resources=(None,), out_axis_resources=None)(prng_key)
+        logging.info("Compiling init_state")
+        init_computation = self._pjit(init_state, in_axis_resources=(None,), out_axis_resources=None)
+        logging.info("Initializing states")
+        self._state = init_computation(prng_key)
         flat_paths, _ = jax.tree_flatten(tree_paths(self._state))
         flat_values, _ = jax.tree_flatten(self._state)
         for path, value in zip(flat_paths, flat_values):
             logging.info("Trainer state: %s=%s(%s)", path, value.dtype, value.shape)
+        logging.info("Compiling computation")
         self._computation = self._pjit(self._forward_and_update,
                                        in_axis_resources=dict(prng_key=None, state=None,
                                                               input_batch=self._input_sharding()),
                                        out_axis_resources=dict(state=None, summaries=None, loss=None, aux=None))
+        logging.info("Compiling computation done")
 
     def run_step(self, step: int, prng_key: jax.random.KeyArray):
         self.checkpointer.save(step, self._state)
@@ -89,7 +94,8 @@ class SpmdTrainer(Module):
 
     def _forward_and_update(self, prng_key: jax.random.KeyArray, state: module.NestedParameters,
                             input_batch: Dict[str, Any]):
-        prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
+        forward_key, learner_key = jax.random.split(prng_key)
+        del prng_key
 
         def _forward(model_parameters, input_batch):
             forward_context: InvocationContext = self.model.make_invocation_context(
