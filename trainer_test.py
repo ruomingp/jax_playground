@@ -4,8 +4,8 @@ import jax
 import jax.random
 from jax.experimental import maps
 from jax.experimental import mesh_utils
-from absl.testing import absltest
-from absl import flags
+from absl.testing import absltest, parameterized
+from absl import flags, logging
 
 import config as config_lib
 import imagenet
@@ -17,8 +17,14 @@ from trainer import SpmdTrainer
 FLAGS = flags.FLAGS
 
 
-class TrainerTest(absltest.TestCase):
-    def testTrainer(self):
+class TrainerTest(parameterized.TestCase):
+
+    @parameterized.parameters(
+        ('cpu', (1, 1)),
+        ('tpu', (8, 1)),
+        ('tpu', (2, 4)),
+    )
+    def testTrainer(self, platform, mesh_shape):
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
         cfg.dir = tempfile.mkdtemp()
         cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=16)
@@ -29,14 +35,16 @@ class TrainerTest(absltest.TestCase):
         cfg.checkpointer.write_every_n_steps = 5
         run_trainer = lambda: self._runTrainer(cfg, num_steps=11)
         devices = jax.devices()
-        if len(devices) == 8 and all(device.platform == 'tpu' for device in devices):
-            mesh_shape = (4, 2)
+        if not all(device.platform == platform for device in devices):
+            logging.info('Skipping test for %s on %s', platform, devices)
+            return
+        if platform == 'cpu':
+            run_trainer()
+        else:
             devices = mesh_utils.create_device_mesh(mesh_shape)
             mesh = maps.Mesh(devices, ("data", "model"))
             with maps.mesh(mesh.devices, mesh.axis_names):
                 run_trainer()
-        else:
-            run_trainer()
 
     def _runTrainer(self, cfg, num_steps):
         trainer: SpmdTrainer = cfg.instantiate()
