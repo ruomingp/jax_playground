@@ -72,15 +72,18 @@ class SpmdTrainer(Module):
             logging.info("Trainer state: %s=%s(%s)", path, value.dtype, value.shape)
         logging.info("Compiling computation")
         self._computation = self._pjit(self._forward_and_update,
-                                       in_axis_resources=dict(prng_key=None, state=None,
-                                                              input_batch=self._input_sharding()),
+                                       in_axis_resources=(None,  # prng_key
+                                           None,  # state
+                                           self._input_sharding(),  # input_batch
+                                           ),
                                        out_axis_resources=dict(state=None, summaries=None, loss=None, aux=None))
         logging.info("Compiling computation done")
 
     def run_step(self, step: int, prng_key: jax.random.KeyArray):
         self.checkpointer.save(step, self._state)
         input_batch = next(self.input)
-        outputs = self._computation(prng_key=prng_key, state=self._state, input_batch=input_batch)
+        # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
+        outputs = self._computation(prng_key, self._state, input_batch)
         logging.info("Process % 3d step % 8d: loss=%s aux=%s",
                      jax.process_index(), step, outputs["loss"], outputs["aux"])
         self._state = outputs["state"]
@@ -101,7 +104,7 @@ class SpmdTrainer(Module):
             forward_context: InvocationContext = self.model.make_invocation_context(
                 parameters=model_parameters, is_training=True, prng_key=forward_key)
             with module.root_context(forward_context):
-                loss, aux = self.model(**input_batch)
+                loss, aux = self.model(input_batch['image'], input_batch['label'])
             return loss, dict(aux=aux, parameter_updates=forward_context.get_parameter_updates(),
                               summaries=forward_context.get_summaries())
 
