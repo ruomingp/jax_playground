@@ -72,10 +72,11 @@ class SpmdTrainer(Module):
             logging.info("Trainer state: %s=%s(%s)", path, value.dtype, value.shape)
         logging.info("Compiling computation")
         self._computation = self._pjit(self._forward_and_update,
-                                       in_axis_resources=(None,  # prng_key
+                                       in_axis_resources=(
+                                           None,  # prng_key
                                            None,  # state
                                            self._input_sharding(),  # input_batch
-                                           ),
+                                       ),
                                        out_axis_resources=dict(state=None, summaries=None, loss=None, aux=None))
         logging.info("Compiling computation done")
 
@@ -104,7 +105,7 @@ class SpmdTrainer(Module):
             forward_context: InvocationContext = self.model.make_invocation_context(
                 parameters=model_parameters, is_training=True, prng_key=forward_key)
             with module.root_context(forward_context):
-                loss, aux = self.model(input_batch['image'], input_batch['label'])
+                loss, aux = self.model(**input_batch)
             return loss, dict(aux=aux, parameter_updates=forward_context.get_parameter_updates(),
                               summaries=forward_context.get_summaries())
 
