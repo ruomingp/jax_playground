@@ -1,3 +1,4 @@
+import os.path
 import tempfile
 
 import jax
@@ -25,18 +26,20 @@ class TrainerTest(parameterized.TestCase):
         ('tpu', (2, 4)),
     )
     def testTrainer(self, platform, mesh_shape):
+        trainer_dir = tempfile.mkdtemp()
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
-        cfg.dir = tempfile.mkdtemp()
         cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=16)
         cfg.input = config_lib.InstantiableConfig.for_class(imagenet.DummyInput)
         cfg.learner = learner.Learner.default_config().set(
             optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(
                 learning_rate=0.1, momentum=0.9))
         cfg.checkpointer.write_every_n_steps = 5
+        cfg.checkpointer.dir = os.path.join(trainer_dir, "checkpoints")
+        cfg.summary_writer.dir = os.path.join(trainer_dir, "summaries")
         run_trainer = lambda: self._runTrainer(cfg, num_steps=11)
         devices = jax.devices()
         if not all(device.platform == platform for device in devices):
-            logging.info('Skipping test for %s on %s', platform, devices)
+            logging.info('Skipping test for %s on %s', platform, [device.platform for device in devices])
             return
         if platform == 'cpu':
             run_trainer()
@@ -47,7 +50,7 @@ class TrainerTest(parameterized.TestCase):
                 run_trainer()
 
     def _runTrainer(self, cfg, num_steps):
-        trainer: SpmdTrainer = cfg.instantiate()
+        trainer: SpmdTrainer = cfg.instantiate(parent=None)
 
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)

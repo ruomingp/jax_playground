@@ -8,6 +8,9 @@ import config as config_lib
 from module import Module, tree_paths
 
 
+State = Dict[str, Any]
+
+
 class Checkpointer(Module):
 
     @classmethod
@@ -27,7 +30,7 @@ class Checkpointer(Module):
     def ckpt_dir(self):
         return f"{self.config.dir}/process_{jax.process_index():03d}"
 
-    def save(self, step: int, state: Dict[str, Any]):
+    def save(self, *, step: int, state: State):
         cfg = self.config
         if step % cfg.write_every_n_steps != 0:
             return
@@ -45,7 +48,7 @@ class Checkpointer(Module):
             keep_every_n_steps=cfg.keep_every_n_steps)
         # TODO(ruoming): add synchronization across processes.
 
-    def restore(self, state, step: Optional[int] = None) -> Dict[str, Any]:
+    def restore(self, *, step: Optional[int] = None, state: State) -> State:
         flattened_state, pytree_state = jax.tree_flatten(state)
         str_pytree_state = str(pytree_state)
         input_target = {
