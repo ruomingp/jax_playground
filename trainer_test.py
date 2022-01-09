@@ -23,12 +23,13 @@ class TrainerTest(absltest.TestCase):
         cfg.learner = learner.Learner.default_config().set(
             optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(
                 learning_rate=0.1, momentum=0.9))
+        cfg.checkpointer.write_every_n_steps = 5
         trainer: SpmdTrainer = cfg.instantiate()
 
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
         trainer.init(init_key)
-        for step in range(10):
+        for step in range(11):
             prng_key, run_key = jax.random.split(prng_key)
             trainer.run_step(step=step, prng_key=run_key)
 

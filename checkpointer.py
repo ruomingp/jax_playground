@@ -34,9 +34,6 @@ class Checkpointer(Module):
         # Extract/flatten data structure to store to disk. Flax requires a flattened
         # data structure to be passed to the checkpointer.
         flattened_state, pytree_state = jax.tree_flatten(state)
-        flattened_paths, _ = jax.tree_flatten(tree_paths(state))
-        for path, entry in zip(flattened_paths, flattened_state):
-            logging.info("flattened_state: %s=%s", path, type(entry))
         checkpoint_target = {
             'flattened_state': flattened_state,
             # Saves a serialized version of the pytree structure to detect potential

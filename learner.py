@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Callable
+from typing import NamedTuple, Tuple
 
 import jax
 from jax import nn
@@ -13,8 +13,7 @@ from module import Module, NestedParameters
 Tensor = jnp.ndarray
 
 
-@dataclasses.dataclass
-class LearnerState:
+class LearnerState(NamedTuple):
     optimizer: optax.OptState
 
 
@@ -32,15 +31,15 @@ class Learner(Module):
         self.optimizer: optax.GradientTransformation = cfg.optimizer.instantiate()
 
     def init(self, model_params: NestedParameters) -> LearnerState:
-        return dict(optimizer=self.optimizer.init(model_params))
+        return LearnerState(optimizer=self.optimizer.init(model_params))
 
-    def update(self, *, gradients: NestedParameters, model_params: NestedParameters) -> NestedParameters:
-        parameter_updates, optimizer_state = self.optimizer.update(gradients, state=self.parameters["optimizer"],
-                                                                   params=model_params)
-        self.add_parameter_update('optimizer', optimizer_state)
+    def update(self, state: LearnerState, *, gradients: NestedParameters, model_params: NestedParameters) -> Tuple[
+        LearnerState, NestedParameters]:
+        parameter_updates, optimizer_state = self.optimizer.update(
+            gradients, state=state.optimizer, params=model_params)
         parameter_updates = self._adjust_updates(parameter_updates, gradients=gradients, model_params=model_params)
         updated_model_params = optax.apply_updates(model_params, parameter_updates)
-        return updated_model_params
+        return LearnerState(optimizer=optimizer_state), updated_model_params
 
     def _adjust_updates(self, updates: NestedParameters, *, gradients: NestedParameters,
                         model_params: NestedParameters) -> NestedParameters:

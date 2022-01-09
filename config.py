@@ -41,6 +41,7 @@ import types
 from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
+from utils import is_named_tuple
 
 
 class InvalidConfigNameError(ValueError):
@@ -85,20 +86,6 @@ def validate_config_field_value(value: Any) -> None:
         raise InvalidConfigValueError(
             f'Invalid config value type {type(value)} for value "{value}"'
         )
-
-
-def _is_named_tuple(x):
-    """Returns whether an object is an instance of a collections.namedtuple.
-
-    Examples::
-      _is_named_tuple((42, 'hi')) ==> False
-      Foo = collections.namedtuple('Foo', ['a', 'b'])
-      _is_named_tuple(Foo(a=42, b='hi')) ==> True
-
-    Args:
-      x: The object to check.
-    """
-    return isinstance(x, tuple) and hasattr(x, "_fields") and hasattr(x, "_asdict")
 
 
 class _ConfigField:
@@ -270,7 +257,7 @@ class Config:
                 return [(f"{key}[{k}]", v) for k, v in val.items()]
             elif dataclasses.is_dataclass(val):
                 return _default_enter_fn(key, val.__dict__)
-            elif _is_named_tuple(val):
+            elif is_named_tuple(val):
                 return _default_enter_fn(key, val._asdict())
             elif isinstance(val, (list, tuple, range)):
                 return [(f"{key}[{i}]", v) for i, v in enumerate(val)]

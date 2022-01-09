@@ -23,6 +23,7 @@ from jax import numpy as jnp
 
 import config as config_lib
 import param_init
+from utils import is_named_tuple
 
 NestedParameters = Dict[str, Union[jnp.ndarray, "NestedParameters"]]
 
@@ -33,6 +34,8 @@ def tree_paths(tree):
 
     if isinstance(tree, Mapping):
         return {k: jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in tree.items()}
+    elif is_named_tuple(tree):
+        return tree_paths(tree._asdict())
     elif isinstance(tree, Sequence):
         return [jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in enumerate(tree)]
     else:
