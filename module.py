@@ -13,8 +13,9 @@ import copy
 import dataclasses
 import re
 import threading
+from collections import abc
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Union, Set
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, Set
 
 import jax
 from absl import logging
@@ -26,8 +27,42 @@ import param_init
 NestedParameters = Dict[str, Union[jnp.ndarray, "NestedParameters"]]
 
 
-class OutputCollection:
+def tree_paths(tree):
+    def _concat(prefix, suffix):
+        return f'{prefix}.{suffix}' if suffix else f'{prefix}'
 
+    if isinstance(tree, Mapping):
+        return {k: jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in tree.items()}
+    elif isinstance(tree, Sequence):
+        return [jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in enumerate(tree)]
+    else:
+        return ''
+
+
+class FrozenDict(abc.Mapping):
+    def __init__(self, *args, **kwargs):
+        self.contents = dict(*args, **kwargs)
+
+    def __iter__(self):
+        return iter(self.contents)
+
+    def __len__(self):
+        return len(self.contents)
+
+    def __getitem__(self, name):
+        return self.contents[name]
+
+    def __eq__(self, other):
+        return isinstance(other, FrozenDict) and self.contents == other.contents
+
+    def __hash__(self):
+        return hash(tuple(self.contents.items()))
+
+    def __repr__(self):
+        return f"FrozenDict({self.contents})"
+
+
+class OutputCollection:
     # Some standard section names.
     SECTION_DEFAULT = ""
     SECTION_SUMMARY = "summary"
@@ -74,7 +109,7 @@ class OutputCollection:
 @dataclass
 class InvocationContext:
     module: "Module"
-    parameters: NestedParameters
+    parameters: FrozenDict
     is_training: bool
     prng_key: jax.random.KeyArray
     output_collection: OutputCollection
@@ -92,13 +127,14 @@ class InvocationContext:
         assert kwargs["module"] is self.module
         return InvocationContext(**kwargs)
 
-    def add_child(self, name: str) -> "InvocationContext":
+    def add_child(self, name: str, *, parameters=None) -> "InvocationContext":
         self.prng_key, child_key = jax.random.split(self.prng_key)
+        parameters = parameters or self.parameters.get(name)
         return InvocationContext(
             module=getattr(self.module, name),
             is_training=self.is_training,
             prng_key=child_key,
-            parameters=self.parameters.get(name),
+            parameters=parameters,
             output_collection=self.output_collection.add_child(name),
         )
 
@@ -148,8 +184,8 @@ def root_context(context: InvocationContext):
 
 
 @contextlib.contextmanager
-def child_context(name: str):
-    context = current_context().add_child(name)
+def child_context(name: str, **kwargs):
+    context = current_context().add_child(name, **kwargs)
     with set_current_context(context) as c:
         yield c
 
@@ -198,7 +234,7 @@ class Module(config_lib.Configurable):
             try:
                 return self._children[name]
             except KeyError:
-                raise AttributeError(name)
+                raise AttributeError(f"{type(self)}.{name}")
 
     @property
     def parent(self):
@@ -305,7 +341,7 @@ class BaseLayer(Module):
         return self.parent.param_init()
 
     def initialize_parameters_recursively(
-        self, prng_key: jax.random.KeyArray
+            self, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         prng_key, module_key = jax.random.split(prng_key)
         params = self._initialize_layer_parameters(prng_key=module_key)
@@ -316,17 +352,17 @@ class BaseLayer(Module):
         return params
 
     def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
+            self, *, prng_key: jax.random.KeyArray
     ) -> NestedParameters:
         return {}
 
     def _initialize_parameter(
-        self,
-        name: str,
-        *,
-        prng_key: jax.random.KeyArray,
-        shape: Sequence[int],
-        dtype: Optional[jnp.dtype] = None,
+            self,
+            name: str,
+            *,
+            prng_key: jax.random.KeyArray,
+            shape: Sequence[int],
+            dtype: Optional[jnp.dtype] = None,
     ) -> jnp.ndarray:
         """Adds a parameter with the given name and shape.
 

@@ -1,18 +1,25 @@
 """Reference: https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py."""
 import math
+from typing import Optional
 
 import jax.nn
 from jax import numpy as jnp
+import flax
 
 import config as config_lib
 import layers
+import param_init
 from layers import Conv2D, BatchNorm, get_activation_fn
-from module import Module
+from module import BaseLayer, Module
 
 Tensor = jnp.ndarray
 
 
-class Downsample(Module):
+def batch_norm():
+    return BatchNorm.default_config().set(decay=0.9)
+
+
+class Downsample(BaseLayer):
     """A downsampling layer."""
 
     @classmethod
@@ -28,7 +35,7 @@ class Downsample(Module):
         )
         cfg.define(
             "norm",
-            BatchNorm.default_config().set(decay=0.9),
+            batch_norm(),
             "The normalization layer config.",
         )
         return cfg
@@ -52,7 +59,7 @@ class Downsample(Module):
         return self.norm(x)
 
 
-class BasicBlock(Module):
+class BasicBlock(BaseLayer):
     """A basic ResNet block."""
 
     @classmethod
@@ -70,7 +77,7 @@ class BasicBlock(Module):
         )
         cfg.define(
             "norm",
-            BatchNorm.default_config().set(decay=0.9),
+            batch_norm(),
             "The normalization layer config.",
         )
         cfg.define("activation", "nn.relu", "The activation function.")
@@ -104,7 +111,7 @@ class BasicBlock(Module):
             self._add_child(
                 "downsample",
                 cfg.downsample.set(
-                    strides=(cfg.stride, cfg.stride),
+                    stride=cfg.stride,
                     input_dim=cfg.input_dim,
                     output_dim=cfg.output_dim,
                 ),
@@ -124,7 +131,7 @@ class BasicBlock(Module):
         return x
 
 
-class ResNetStage(Module):
+class ResNetStage(BaseLayer):
     """A stage of ResNet, consisting of multiple blocks."""
 
     @classmethod
@@ -164,13 +171,14 @@ class ResNetStage(Module):
             input_dim = cfg.output_dim
 
     def forward(self, inputs: Tensor) -> Tensor:
+        cfg = self.config
         x = inputs
         for block_i in range(cfg.num_blocks):
             x = getattr(self, f"block{block_i}")(x)
         return x
 
 
-class ResNetModel(Module):
+class ResNetModel(BaseLayer):
     """The generic ResNet model."""
 
     @classmethod
@@ -180,6 +188,11 @@ class ResNetModel(Module):
             "hidden_dim",
             64,
             "The feature dim between the stem layer and the first block.",
+        )
+        cfg.define(
+            "norm",
+            batch_norm(),
+            "The normalization layer config.",
         )
         cfg.define("stage", ResNetStage.default_config(), "The stage config.")
         cfg.define(
@@ -192,8 +205,10 @@ class ResNetModel(Module):
             1000,
             "The number of classification classes.",
         )
-        # kaiming_normal_(mode='fan_out', nonlinearity='relu').
-        cfg.param_init.set(fan="fan_out", distribution="normal", gain=math.sqrt(2))
+        cfg.param_init = param_init.DefaultInit.default_config().set(
+            # kaiming_normal_(mode='fan_out', nonlinearity='relu').
+            fan="fan_out", distribution="normal", gain=math.sqrt(2))
+        cfg.dtype = jnp.float32
         return cfg
 
     @classmethod
@@ -208,7 +223,7 @@ class ResNetModel(Module):
         hidden_dim = cfg.hidden_dim
         self._add_child(
             "conv1",
-            layers.Conv2D(
+            layers.Conv2D.default_config().set(
                 window=(7, 7),
                 padding=((3, 3), (3, 3)),
                 strides=(2, 2),
@@ -225,6 +240,7 @@ class ResNetModel(Module):
                     input_dim=hidden_dim,
                     output_dim=hidden_dim * 2,
                     stride=1 if stage_i == 0 else 2,
+                    num_blocks=num_blocks,
                 ),
             )
             hidden_dim *= 2
@@ -237,17 +253,12 @@ class ResNetModel(Module):
 
     def forward(self, image: Tensor, label: Tensor) -> Tensor:
         cfg = self.config
+        image = image.astype(self.dtype())
         x = self.conv1(image)
         x = self.norm1(x)
         x = jax.nn.relu(x)
-        x = jax.lax.reduce_window(
-            x,
-            init_value=0,
-            computation=jax.lax.max,
-            window_dimensions=(3, 3),
-            window_strides=(2, 2),
-            padding=((1, 1), (1, 1)),
-        )
+        x = jax.lax.reduce_window(x, init_value=-jnp.inf, computation=jax.lax.max, window_dimensions=(1, 3, 3, 1), window_strides=(1, 2, 2, 1), padding=((0, 0), (1, 1), (1, 1), (0, 0)))
+        # x = flax.linen.max_pool(x, window_shape=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)))
         for stage_i, num_blocks in enumerate(cfg.num_blocks_per_stage):
             x = getattr(self, f"stage{stage_i}")(x)
         # [batch, hidden].

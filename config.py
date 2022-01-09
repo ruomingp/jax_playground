@@ -373,7 +373,7 @@ class InstantiableConfig(Config):
         """
         assert self.cls is not None
 
-        if issubclass(self.cls, Configurable):
+        if isinstance(self.cls, type) and issubclass(self.cls, Configurable):
             # The class initializer is expected to support initialization using Config.
             return self.cls(self, **kwargs)
         else:

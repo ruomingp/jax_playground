@@ -1,25 +1,13 @@
+from typing import Any, Dict, Optional
+
 import jax
 from jax import numpy as jnp
-
-import config as config_lib
-from module import Module
 from tensorflow import summary as tf_summary
 
-from typing import Any, Dict, Mapping, Optional, Sequence, Union
+import config as config_lib
+from module import Module, tree_paths
+
 Tensor = jnp.ndarray
-
-
-def tree_paths(tree):
-    def _concat(prefix, suffix):
-        return f'{prefix}.{suffix}' if suffix else prefix
-    if isinstance(tree, Mapping):
-        for k, v in tree.items():
-            return jax.tree_map(lambda value: _concat(k, value), tree_paths(v))
-    elif isinstance(tree, Sequence):
-        for k, v in enumerate(tree):
-            return jax.tree_map(lambda value: _concat(k, value), tree_paths(v))
-    else:
-        return ''
 
 
 class SummaryWriter(Module):
@@ -47,5 +35,6 @@ class SummaryWriter(Module):
                     tf_summary.scalar(path, value, step=step)
                 else:
                     tf_summary.histogram(path, value, step=step)
+
             jax.tree_map(write, tree_paths(values), values)
         self.summary_writer.flush()
