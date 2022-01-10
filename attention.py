@@ -8,9 +8,7 @@ from jax import numpy as jnp
 import config as config_lib
 import param_init
 from layers import check_numerics, LayerNorm, Dropout, Linear, get_activation_fn
-from module import BaseLayer, Module, NestedParameters
-
-Tensor = jnp.ndarray
+from module import BaseLayer, Module, NestedTensor, Tensor
 
 
 def make_causal_mask(seq_len: int) -> Tensor:
@@ -148,7 +146,7 @@ class _BaseMultiheadLinear(BaseLayer):
 
     def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         cfg = self.config
         params = dict(
             weight=self._initialize_parameter(

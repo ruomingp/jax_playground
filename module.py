@@ -23,9 +23,7 @@ from jax import numpy as jnp
 
 import config as config_lib
 import param_init
-from utils import is_named_tuple
-
-NestedParameters = Dict[str, Union[jnp.ndarray, "NestedParameters"]]
+from utils import is_named_tuple, Tensor, NestedTensor
 
 
 def tree_paths(tree):
@@ -249,6 +247,9 @@ class Module(config_lib.Configurable):
         return f"{self.parent.path()}.{self.config.name}"
 
     def __str__(self):
+        return repr(self)
+
+    def __repr__(self):
         return f"{type(self)}@{self.path()}"
 
     def _add_child(
@@ -345,7 +346,7 @@ class BaseLayer(Module):
 
     def initialize_parameters_recursively(
             self, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         prng_key, module_key = jax.random.split(prng_key)
         params = self._initialize_layer_parameters(prng_key=module_key)
         for name, child in self._children.items():
@@ -356,7 +357,7 @@ class BaseLayer(Module):
 
     def _initialize_layer_parameters(
             self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         return {}
 
     def _initialize_parameter(

@@ -8,6 +8,7 @@ from jax import numpy as jnp
 import config as config_lib
 import layers
 import param_init
+from metrics import WeightedScalar
 from layers import Conv2D, BatchNorm, get_activation_fn
 from module import BaseLayer, Module
 
@@ -256,7 +257,8 @@ class ResNetModel(BaseLayer):
         x = self.conv1(image)
         x = self.norm1(x)
         x = jax.nn.relu(x)
-        x = jax.lax.reduce_window(x, init_value=-jnp.inf, computation=jax.lax.max, window_dimensions=(1, 3, 3, 1), window_strides=(1, 2, 2, 1), padding=((0, 0), (1, 1), (1, 1), (0, 0)))
+        x = jax.lax.reduce_window(x, init_value=-jnp.inf, computation=jax.lax.max, window_dimensions=(1, 3, 3, 1),
+                                  window_strides=(1, 2, 2, 1), padding=((0, 0), (1, 1), (1, 1), (0, 0)))
         for stage_i, num_blocks in enumerate(cfg.num_blocks_per_stage):
             x = getattr(self, f"stage{stage_i}")(x)
         # [batch, hidden].
@@ -269,4 +271,8 @@ class ResNetModel(BaseLayer):
         per_example_loss = jnp.sum(label_onehot * jax.nn.log_softmax(logits), axis=-1)
         # Scalar.
         loss = jnp.mean(per_example_loss)
-        return loss, {}
+        # [batch].
+        predictions = jnp.argmax(logits, axis=-1)
+        num_examples = float(label.shape[0])
+        accuracy = jnp.equal(predictions, label).sum() / num_examples
+        return loss, dict(accuracy=WeightedScalar(accuracy, num_examples), loss=WeightedScalar(loss, num_examples))

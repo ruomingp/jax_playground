@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
 
 import jax
+from absl import logging
 from jax import numpy as jnp
 from tensorflow import summary as tf_summary
 
@@ -31,6 +32,7 @@ class SummaryWriter(Module):
             return
         with self.summary_writer.as_default(step=step):
             def write(path: str, value: jnp.ndarray):
+                logging.info("SummaryWriter %s: %s=%s", self.path(), path, value)
                 if value.ndim == 0:
                     tf_summary.scalar(path, value, step=step)
                 else:

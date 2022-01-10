@@ -4,7 +4,7 @@ import jax
 from jax import nn
 from jax import numpy as jnp
 
-from module import BaseLayer, NestedParameters
+from module import BaseLayer, NestedTensor
 
 Tensor = jnp.ndarray
 
@@ -38,7 +38,7 @@ class Dropout(BaseLayer):
 
     def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         return {}
 
     def forward(self, x: Tensor) -> Tensor:
@@ -64,7 +64,7 @@ class LayerNorm(BaseLayer):
 
     def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         cfg = self.config
         return {
             "scale": jnp.ones(shape=[cfg.dim], dtype=self.dtype()),
@@ -95,7 +95,7 @@ class RMSNorm(BaseLayer):
 
     def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         cfg = self.config
         return {"scale": jnp.ones(shape=[cfg.dim], dtype=self.dtype())}
 
@@ -123,7 +123,7 @@ class BatchNorm(BaseLayer):
 
     def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         cfg = self.config
         return {
             "scale": jnp.ones(shape=[cfg.dim], dtype=self.dtype()),
@@ -171,7 +171,7 @@ class Linear(BaseLayer):
 
     def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         cfg = self.config
         params = dict(
             weight=self._initialize_parameter(
@@ -208,7 +208,7 @@ class Conv2D(BaseLayer):
 
     def _initialize_layer_parameters(
         self, *, prng_key: jax.random.KeyArray
-    ) -> NestedParameters:
+    ) -> NestedTensor:
         cfg = self.config
         if cfg.padding in ("SAME", "VALID"):
             if cfg.padding == "SAME" and any(s > 1 for s in cfg.strides):

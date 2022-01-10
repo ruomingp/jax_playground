@@ -1,3 +1,9 @@
+from jax import numpy as jnp
+from typing import Dict, Union
+
+
+Tensor = jnp.ndarray
+NestedTensor = Dict[str, Union[Tensor, 'NestedTensor']]
 
 
 def is_named_tuple(x):
