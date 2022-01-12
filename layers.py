@@ -1,10 +1,11 @@
-from typing import Callable
+from typing import Callable, Dict
 
 import jax
 from jax import nn
 from jax import numpy as jnp
 
-from module import BaseLayer, NestedTensor
+from module import BaseLayer, NestedTensor, ParameterSpec, PartitionSpec
+import param_init
 
 Tensor = jnp.ndarray
 
@@ -36,11 +37,6 @@ class Dropout(BaseLayer):
         cfg.define("rate", 0, "The dropout rate (i.e., 1 - keep_prob).")
         return cfg
 
-    def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
-        return {}
-
     def forward(self, x: Tensor) -> Tensor:
         cfg = self.config
         if not self.is_training or cfg.rate == 0:
@@ -62,13 +58,11 @@ class LayerNorm(BaseLayer):
         cfg.define("eps", 1e-8, "The epsilon.")
         return cfg
 
-    def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": jnp.ones(shape=[cfg.dim], dtype=self.dtype()),
-            "bias": jnp.zeros(shape=[cfg.dim], dtype=self.dtype()),
+            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
+            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -93,11 +87,11 @@ class RMSNorm(BaseLayer):
         cfg.define("eps", 1e-8, "The epsilon.")
         return cfg
 
-    def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
-        return {"scale": jnp.ones(shape=[cfg.dim], dtype=self.dtype())}
+        return {
+            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
+        }
 
     def forward(self, x: Tensor) -> Tensor:
         cfg = self.config
@@ -121,15 +115,15 @@ class BatchNorm(BaseLayer):
         cfg.define("eps", 1e-8, "The epsilon.")
         return cfg
 
-    def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": jnp.ones(shape=[cfg.dim], dtype=self.dtype()),
-            "bias": jnp.zeros(shape=[cfg.dim], dtype=self.dtype()),
-            "moving_mean": jnp.zeros(shape=[cfg.dim], dtype=jnp.float32),
-            "moving_variance": jnp.ones(shape=[cfg.dim], dtype=jnp.float32),
+            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
+            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
+            "moving_mean": ParameterSpec(shape=[cfg.dim], dtype=jnp.float32, partition_spec=PartitionSpec('model'),
+                                         initializer=param_init.ConstantInitializer(0.)),
+            "moving_variance": ParameterSpec(shape=[cfg.dim], dtype=jnp.float32, partition_spec=PartitionSpec('model'),
+                                             initializer=param_init.ConstantInitializer(1.)),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -167,19 +161,18 @@ class Linear(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
+        cfg.define("param_partition_spec", PartitionSpec(None, None),
+                   "The partition spec for the weight [input_dim, output_dim], e.g.,"
+                   "PartitionSpec(None, 'model').")
         return cfg
 
-    def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         params = dict(
-            weight=self._initialize_parameter(
-                "weight", prng_key=prng_key, shape=(cfg.input_dim, cfg.output_dim)
-            )
-        )
+            weight=ParameterSpec(shape=(cfg.input_dim, cfg.output_dim), partition_spec=cfg.param_partition_spec))
         if cfg.bias:
-            params["bias"] = jnp.zeros(shape=[cfg.output_dim], dtype=self.dtype())
+            params["bias"] = ParameterSpec(shape=[cfg.output_dim],
+                                           partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
         return params
 
     def forward(self, x: Tensor) -> Tensor:
@@ -204,11 +197,12 @@ class Conv2D(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
+        cfg.define("param_partition_spec", PartitionSpec(None, None, None, None),
+                   "The partition spec for the weight [H, W, input_dim, output_dim], e.g.,"
+                   "PartitionSpec(None, None, None, 'model').")
         return cfg
 
-    def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         if cfg.padding in ("SAME", "VALID"):
             if cfg.padding == "SAME" and any(s > 1 for s in cfg.strides):
@@ -218,14 +212,12 @@ class Conv2D(BaseLayer):
             if any(p < 0 for p in (top, bottom, left, right)):
                 raise NotImplementedError("Negative padding is not supported")
         params = dict(
-            weight=self._initialize_parameter(
-                "weight",
-                prng_key=prng_key,
-                shape=list(cfg.window) + [cfg.input_dim, cfg.output_dim],
-            )
+            weight=ParameterSpec(
+                shape=list(cfg.window) + [cfg.input_dim, cfg.output_dim], partition_spec=cfg.param_partition_spec)
         )
         if cfg.bias:
-            params["bias"] = jnp.zeros(shape=[cfg.output_dim], dtype=self.dtype())
+            params["bias"] = ParameterSpec(shape=[cfg.output_dim],
+                                           partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
         return params
 
     def forward(self, x: Tensor) -> Tensor:

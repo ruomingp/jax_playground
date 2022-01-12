@@ -6,7 +6,8 @@ from jax import numpy as jnp
 from tensorflow import summary as tf_summary
 
 import config as config_lib
-from module import Module, tree_paths
+from module import Module
+from utils import tree_paths
 
 Tensor = jnp.ndarray
 
@@ -38,5 +39,5 @@ class SummaryWriter(Module):
                 else:
                     tf_summary.histogram(path, value, step=step)
 
-            jax.tree_map(write, tree_paths(values), values)
+            jax.tree_map(write, tree_paths(values, separator='/'), values)
         self.summary_writer.flush()

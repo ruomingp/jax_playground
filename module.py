@@ -15,30 +15,19 @@ import re
 import threading
 from collections import abc
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, Set
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Set
 
 import jax
 from absl import logging
 from jax import numpy as jnp
+from jax.experimental.pjit import PartitionSpec
 
 import config as config_lib
 import param_init
-from utils import is_named_tuple, Tensor, NestedTensor
+from utils import NestedTensor, Tensor
 
 
-def tree_paths(tree):
-    def _concat(prefix, suffix):
-        return f'{prefix}.{suffix}' if suffix else f'{prefix}'
-
-    if isinstance(tree, Mapping):
-        return {k: jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in tree.items()}
-    elif is_named_tuple(tree):
-        return tree_paths(tree._asdict())
-    elif isinstance(tree, Sequence):
-        return [jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in enumerate(tree)]
-    else:
-        return ''
-
+NestedPartitionSpec = Dict[str, Union[PartitionSpec, 'NestedPartitionSpec']]
 
 class FrozenDict(abc.Mapping):
     def __init__(self, *args, **kwargs):
@@ -110,7 +99,7 @@ class OutputCollection:
 @dataclass
 class InvocationContext:
     module: "Module"
-    parameters: FrozenDict
+    parameters: NestedTensor
     is_training: bool
     prng_key: jax.random.KeyArray
     output_collection: OutputCollection
@@ -219,7 +208,7 @@ class Module(config_lib.Configurable):
         if cfg.param_init is not None:
             init = cfg.param_init.instantiate()
         elif parent is None:
-            init = param_init.DefaultInit.default_config().instantiate()
+            init = param_init.DefaultInitializer.default_config().instantiate()
         else:
             init = None
         self._param_init = init
@@ -329,6 +318,18 @@ class Module(config_lib.Configurable):
         raise ValueError("context.module does not match self")
 
 
+@dataclasses.dataclass
+class ParameterSpec:
+    shape: Sequence[int]
+    partition_spec: PartitionSpec
+    # The data type of the param. If None, uses the layer's default dtype.
+    dtype: Optional[jnp.dtype] = None
+    # The initializer of the param. If None, uses the layer's default initializer.
+    initializer: Optional[param_init.Initializer] = None
+
+NestedParameterSpec = Dict[str, Union[ParameterSpec, 'NestedParameterSpec']]
+
+
 class BaseLayer(Module):
 
     def dtype(self):
@@ -338,51 +339,60 @@ class BaseLayer(Module):
             return self.parent.dtype()
         return jnp.float32
 
-    def param_init(self) -> param_init.Init:
+    def param_init(self) -> param_init.Initializer:
         init = getattr(self, "_param_init", None)
         if init is not None:
             return init
         return self.parent.param_init()
 
-    def initialize_parameters_recursively(
-            self, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
-        prng_key, module_key = jax.random.split(prng_key)
-        params = self._initialize_layer_parameters(prng_key=module_key)
+    def create_parameter_specs_recursively(self) -> NestedParameterSpec:
+        specs = self._create_layer_parameter_specs()
+        for name, spec in specs.items():
+            if spec.dtype is None:
+                spec.dtype = self.dtype()
+            if spec.initializer is None:
+                spec.initializer = self.param_init()
         for name, child in self._children.items():
-            assert name not in params
-            prng_key, child_key = jax.random.split(prng_key)
-            params[name] = child.initialize_parameters_recursively(prng_key=child_key)
-        return params
+            assert name not in specs
+            specs[name] = child.create_parameter_specs_recursively()
+        return specs
 
-    def _initialize_layer_parameters(
-            self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
+        """Subclasses can override this method to add layer parameters."""
         return {}
+
+    def initialize_parameters_recursively(
+            self, prng_key: jax.random.KeyArray, param_specs: Optional[NestedParameterSpec] = None
+    ) -> NestedTensor:
+        if param_specs is None:
+            param_specs = self.create_parameter_specs_recursively()
+        params = {}
+        for name, child in param_specs.items():
+            prng_key, child_key = jax.random.split(prng_key)
+            if isinstance(child, ParameterSpec):
+                params[name] = self._initialize_parameter(name, prng_key=child_key, parameter_spec=child)
+            else:
+                params[name] = self.initialize_parameters_recursively(prng_key=child_key, param_specs=child)
+        return params
 
     def _initialize_parameter(
             self,
             name: str,
             *,
             prng_key: jax.random.KeyArray,
-            shape: Sequence[int],
-            dtype: Optional[jnp.dtype] = None,
-    ) -> jnp.ndarray:
+            parameter_spec: ParameterSpec
+    ) -> Tensor:
         """Adds a parameter with the given name and shape.
-
-        **kwargs will be passed to torch.emtpy(). If 'dtype' is not in kwargs, self.dtype() will be used.
 
         Args:
             name: The parameter name.
             prng_key: The pseudo random generator key.
-            shape: The parameter shape.
-            dtype: The parameter data type.
+            parameter_spec: The parameter specification.
 
         Returns:
             The created parameter.
         """
         if name in self._children:
             raise ValueError(f"Child {name} already exists.")
-        return self.param_init().initialize(
-            name, prng_key=prng_key, shape=shape, dtype=dtype or self.dtype()
-        )
+        return parameter_spec.initializer.initialize(
+            name, prng_key=prng_key, shape=parameter_spec.shape, dtype=parameter_spec.dtype)

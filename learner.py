@@ -3,7 +3,7 @@ from typing import NamedTuple, Tuple
 import optax
 
 import config
-from module import Module, NestedTensor
+from module import Module, NestedTensor, NestedPartitionSpec
 
 
 class LearnerState(NamedTuple):
@@ -17,11 +17,18 @@ class Learner(Module):
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("optimizer", None, "The optimizer config.")
+        cfg.define("weight_decay", None, "The weight decay.")
         return cfg
 
     def __init__(self, cfg: config.Config, *, parent: Module):
         super().__init__(cfg, parent=parent)
         self.optimizer: optax.GradientTransformation = cfg.optimizer.instantiate()
+
+    def create_state_partition_specs(self, model_param_partition_specs: NestedPartitionSpec):
+        cfg = self.config
+        if cfg.optimizer.cls == optax.sgd:
+            return [[model_param_partition_specs]]
+        raise NotImplementedError(cfg.optimizer)
 
     def init(self, model_params: NestedTensor) -> LearnerState:
         return LearnerState(optimizer=self.optimizer.init(model_params))

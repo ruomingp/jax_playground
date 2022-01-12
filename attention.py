@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 
 import jax
 from jax import numpy as jnp
@@ -8,7 +8,7 @@ from jax import numpy as jnp
 import config as config_lib
 import param_init
 from layers import check_numerics, LayerNorm, Dropout, Linear, get_activation_fn
-from module import BaseLayer, Module, NestedTensor, Tensor
+from module import BaseLayer, Module, NestedTensor, Tensor, ParameterSpec, PartitionSpec
 
 
 def make_causal_mask(seq_len: int) -> Tensor:
@@ -43,7 +43,7 @@ def make_segment_mask(*, source_segments: Tensor, target_segments: Tensor) -> Te
 
 
 def t5_relative_position_bucket(
-    relative_position, *, bidirectional=True, num_buckets=32, max_distance=128
+        relative_position, *, bidirectional=True, num_buckets=32, max_distance=128
 ):
     """Computes relative position buckets with the T5 algorithm.
 
@@ -83,9 +83,9 @@ def t5_relative_position_bucket(
 
     # The other half of the buckets are for logarithmically bigger bins in positions up to max_distance
     relative_position_if_large = max_exact + (
-        jnp.log(relative_position.astype(jnp.float32) / max_exact)
-        / math.log(max_distance / max_exact)
-        * (num_buckets - max_exact)
+            jnp.log(relative_position.astype(jnp.float32) / max_exact)
+            / math.log(max_distance / max_exact)
+            * (num_buckets - max_exact)
     ).astype(jnp.int32)
     relative_position_if_large = jnp.minimum(
         # relative_position_if_large, jnp.full_like(relative_position_if_large, num_buckets - 1)
@@ -99,7 +99,7 @@ def t5_relative_position_bucket(
     return relative_buckets
 
 
-class MultiheadLinearInit(param_init.DefaultInit):
+class MultiheadLinearInit(param_init.DefaultInitializer):
     """Initialization settings for 3-D projection weights used by MultiheadAttention.
 
     The default fan-in/fan-out calculation does not work for 3-D weights of shape [model_dim, num_heads, per_head_dim],
@@ -140,23 +140,24 @@ class _BaseMultiheadLinear(BaseLayer):
         )
         cfg.define("per_head_dim", 0, "Dimension per head.")
         cfg.define("bias", True, "Whether the linear modules have biases.")
+        cfg.define("param_partition_spec", PartitionSpec(None, None, None),
+                   "The partition spec for the weight [input_dim, num_heads, per_head_dim], e.g.,"
+                   "PartitionSpec(None, 'model', None).")
         assert linear_type in ("input", "output")
         cfg.param_init = MultiheadLinearInit.default_config().set(type=linear_type)
         return cfg
 
-    def _initialize_layer_parameters(
-        self, *, prng_key: jax.random.KeyArray
-    ) -> NestedTensor:
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         params = dict(
-            weight=self._initialize_parameter(
-                "weight",
-                prng_key=prng_key,
+            weight=ParameterSpec(
                 shape=(cfg.model_dim, cfg.num_heads, cfg.per_head_dim),
+                partition_spec=cfg.param_partition_spec
             )
         )
         if cfg.bias:
-            params["bias"] = jnp.zeros(shape=self._bias_shape, dtype=self.dtype())
+            params["bias"] = ParameterSpec(shape=self._bias_shape,
+                                           partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
         return params
 
     def forward(self, inputs: jnp.ndarray) -> jnp.ndarray:
@@ -264,10 +265,10 @@ class MultiheadAttention(BaseLayer):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         for name, dim in (
-            ("q", cfg.query_dim),
-            ("k", cfg.key_dim),
-            ("v", cfg.value_dim),
-            ("o", self.output_dim()),
+                ("q", cfg.query_dim),
+                ("k", cfg.key_dim),
+                ("v", cfg.value_dim),
+                ("o", self.output_dim()),
         ):
             proj_cfg = cfg.output_linear if name == "o" else cfg.input_linear
             proj_cfg.model_dim = dim
@@ -297,12 +298,12 @@ class MultiheadAttention(BaseLayer):
         probs: Tensor
 
     def forward(
-        self,
-        query: Tensor,
-        *,
-        key: Tensor,
-        value: Tensor,
-        mask: Optional[Tensor] = None,
+            self,
+            query: Tensor,
+            *,
+            key: Tensor,
+            value: Tensor,
+            mask: Optional[Tensor] = None,
     ) -> Output:
         """Computes attention for the given query, key, value, and mask.
 
@@ -386,11 +387,11 @@ class TransformerAttentionLayer(BaseLayer):
         probs: Tensor
 
     def forward(
-        self,
-        *,
-        target: Tensor,
-        source: Optional[Tensor] = None,
-        mask: Optional[Tensor] = None,
+            self,
+            *,
+            target: Tensor,
+            source: Optional[Tensor] = None,
+            mask: Optional[Tensor] = None,
     ):
         """Computes attention with target as query and source as key and value.
 
@@ -542,12 +543,12 @@ class TransformerLayer(BaseLayer):
         cross_attention_probs: Optional[Tensor]
 
     def forward(
-        self,
-        data: Tensor,
-        *,
-        self_attention_mask: Optional[Tensor] = None,
-        cross_attention_data: Optional[Tensor] = None,
-        cross_attention_mask: Optional[Tensor] = None,
+            self,
+            data: Tensor,
+            *,
+            self_attention_mask: Optional[Tensor] = None,
+            cross_attention_data: Optional[Tensor] = None,
+            cross_attention_mask: Optional[Tensor] = None,
     ) -> Output:
         self_atten_outputs = self.self_attention(target=data, mask=self_attention_mask)
         data = self_atten_outputs.data

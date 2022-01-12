@@ -14,16 +14,23 @@ from jax.experimental import mesh_utils
 import config as config_lib
 import learner
 import resnet
+from module import Module
 from trainer import SpmdTrainer, SpmdEvaler
 
 FLAGS = flags.FLAGS
 
 
-class DummyInput:
+class DummyInput(Module):
 
-    def __init__(self, batch_size: int = 4, size: Optional[int]=None):
-        self.batch_size = batch_size
-        self.size = size
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define('batch_size', 4, 'The batch size.')
+        cfg.define('total_num_batches', None, 'The total number of batches. If None, unlimited.')
+        return cfg
+
+    def __init__(self, cfg: config_lib.Config, *, parent=None):
+        super().__init__(cfg, parent=parent)
         self._prng_key = jax.random.PRNGKey(1)
         self._num_batches = 0
 
@@ -32,13 +39,14 @@ class DummyInput:
         return self
 
     def __next__(self):
+        cfg = self.config
         self._num_batches += 1
-        if self.size is not None and self._num_batches > self.size:
+        if cfg.total_num_batches is not None and self._num_batches > cfg.total_num_batches:
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
-        return dict(image=jax.random.randint(image_key, shape=[self.batch_size, 224, 224, 3], minval=0, maxval=256,
+        return dict(image=jax.random.randint(image_key, shape=[cfg.batch_size, 224, 224, 3], minval=0, maxval=256,
                                              dtype=np.int32),
-                    label=jax.random.randint(label_key, shape=[self.batch_size], minval=0, maxval=1000, dtype=np.int32))
+                    label=jax.random.randint(label_key, shape=[cfg.batch_size], minval=0, maxval=1000, dtype=np.int32))
 
 
 class TrainerTest(parameterized.TestCase):
@@ -51,13 +59,13 @@ class TrainerTest(parameterized.TestCase):
     def testTrainer(self, platform, mesh_shape):
         trainer_dir = tempfile.mkdtemp()
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
-        cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=16)
-        cfg.input = config_lib.InstantiableConfig.for_class(DummyInput)
+        cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=4)
+        cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
             optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(
                 learning_rate=0.1, momentum=0.9))
         evaler_cfg = SpmdEvaler.default_config().set(
-            name="eval_dummy", input=config_lib.InstantiableConfig.for_class(DummyInput).set(size=2))
+            name="eval_dummy", input=DummyInput.default_config().set(total_num_batches=2))
         evaler_cfg.summary_writer.dir = os.path.join(trainer_dir, "summaries", evaler_cfg.name)
         cfg.evalers = [evaler_cfg]
         cfg.checkpointer.write_every_n_steps = 5

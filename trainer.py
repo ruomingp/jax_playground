@@ -5,6 +5,7 @@ from absl import logging
 from jax import numpy as jnp
 from jax.experimental import PartitionSpec
 from jax.experimental.pjit import pjit
+from functools import partial
 
 import checkpointer
 import config
@@ -13,7 +14,8 @@ import learner
 import metrics
 import module
 import summary_writer
-from module import InvocationContext, Module, NestedTensor, tree_paths
+from module import InvocationContext, Module, NestedTensor
+from utils import tree_paths
 
 
 def _apply_updates(base, updates):
@@ -41,20 +43,20 @@ class _SpmdRunner(Module):
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
         super().__init__(cfg, parent=parent)
         cfg = self.config
-        # self._add_child('input', cfg.input)
-        self.input = cfg.input.instantiate()
+        self._add_child('input', cfg.input)
         self._add_child('summary_writer', cfg.summary_writer)
         self._state = None
         self._jit_compute = None
 
     def _jit(self, fn: Callable, **kwargs):
-        logging.info("Compiling computation %s", fn)
+        logging.debug("Compiling computation %s", fn)
         if all(device.platform in ('tpu', 'gpu') for device in jax.devices()):
             fn = pjit(fn, **kwargs)
         else:
-            logging.info('Falling back to jit on %s', [device.platform for device in jax.devices()])
+            logging.log_first_n(logging.INFO, 'Falling back to jit on %s', 1,
+                                [device.platform for device in jax.devices()])
             fn = jax.jit(fn)
-        logging.info("Compiling computation done")
+        logging.debug("Compiling computation done")
         return fn
 
     def _parameter_sharding(self):
@@ -94,17 +96,25 @@ class SpmdTrainer(_SpmdRunner):
         for evaler_cfg in cfg.evalers:
             self._add_child(evaler_cfg.name, evaler_cfg)
 
+        self._model_param_specs = self.model.create_parameter_specs_recursively()
+        model_param_partition_specs = jax.tree_map(lambda spec: spec.partition_spec, self._model_param_specs)
+        learner_state_partition_specs = self.learner.create_state_partition_specs(model_param_partition_specs)
+        self._trainer_state_partition_specs = _TrainerState(
+            model=self._model_param_specs,
+            learner=learner_state_partition_specs,
+        )
+
     def run(self, prng_key: jax.random.KeyArray, max_step: int):
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
         self._jit_train_step = self._jit(self._train_step,
-                                   in_axis_resources=(
-                                       None,  # prng_key
-                                       self._state_sharding(),
-                                       self._input_sharding(),
-                                   ),
-                                   out_axis_resources=None)
+                                         in_axis_resources=(
+                                             None,  # prng_key
+                                             self._trainer_state_partition_specs,
+                                             self._input_sharding(),
+                                         ),
+                                         out_axis_resources=None)
 
         for step in range(1, max_step + 1):
             prng_key, step_key = jax.random.split(prng_key)
@@ -113,11 +123,14 @@ class SpmdTrainer(_SpmdRunner):
     def _init(self, prng_key: jax.random.KeyArray):
 
         def _init_state(prng_key: jax.random.KeyArray):
-            model_params = self.model.initialize_parameters_recursively(prng_key)
+            model_params = self.model.initialize_parameters_recursively(prng_key, self._model_param_specs)
             learner_params = self.learner.init(model_params)
             return _TrainerState(model=model_params, learner=learner_params)
 
-        init_computation = self._jit(_init_state, in_axis_resources=(None,), out_axis_resources=None)
+        init_computation = self._jit(
+            _init_state,
+            in_axis_resources=(None,),
+            out_axis_resources=self._trainer_state_partition_specs)
         logging.info("Initializing states")
         self._state = init_computation(prng_key)
         flat_paths, _ = jax.tree_flatten(tree_paths(self._state))
@@ -141,10 +154,10 @@ class SpmdTrainer(_SpmdRunner):
         self._state = outputs["state"]
         logging.info("Process % 3d step % 8d: loss=%s aux=%s",
                      jax.process_index(), step, outputs["loss"], outputs["aux"])
-        self.summary_writer(step, outputs["summaries"])
+        self.summary_writer(step, {'loss': outputs["loss"], **outputs["summaries"]})
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
-            self._children[evaler_cfg.name].run_step(step, eval_key, model_params=self._state.model)
+            self._children[evaler_cfg.name].run_step(step, eval_key, model=self.model, model_params=self._state.model)
         self.checkpointer.save(step=step, state=self._state)
 
     def _train_step(self, prng_key: jax.random.KeyArray, state: _TrainerState, input_batch: Dict[str, Any]):
@@ -185,11 +198,11 @@ class SpmdEvaler(_SpmdRunner):
                    "The eval metric accumulator config.")
         return cfg
 
-    def run_step(self, step: int, prng_key: jax.random.KeyArray, *, model_params: NestedTensor):
+    def run_step(self, step: int, prng_key: jax.random.KeyArray, *, model: Module, model_params: NestedTensor):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
             return
-        _jit_eval_batch = self._jit(self._eval_batch,
+        _jit_eval_batch = self._jit(partial(self._eval_batch, model),
                                     in_axis_resources=(
                                         None,  # prng_key
                                         self._parameter_sharding(),
@@ -210,8 +223,7 @@ class SpmdEvaler(_SpmdRunner):
         logging.info("Process % 3d step % 8d: %s.metrics=%s", jax.process_index(), step, self.path(), summaries)
         self.summary_writer(step, summaries)
 
-    def _eval_batch(self, prng_key: jax.random.KeyArray, model_params: NestedTensor, input_batch: Dict[str, Any]):
-        model = self.parent.model
+    def _eval_batch(self, model: Module, prng_key: jax.random.KeyArray, model_params: NestedTensor, input_batch: Dict[str, Any]):
         forward_context: InvocationContext = model.make_invocation_context(
             parameters=model_params, is_training=False, prng_key=prng_key)
         with module.root_context(forward_context):

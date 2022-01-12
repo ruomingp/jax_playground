@@ -1,12 +1,10 @@
 from typing import Any, Dict, Optional
 
-from absl import logging
 import jax
 from flax.training import checkpoints as flax_checkpoints
 
 import config as config_lib
-from module import Module, tree_paths
-
+from module import Module
 
 State = Dict[str, Any]
 
@@ -64,5 +62,3 @@ class Checkpointer(Module):
                 'checkpoint structure and the current one has been detected '
                 f'(`{restored_str_pytree_state}` vs `{str_pytree_state}`).')
         return jax.tree_unflatten(pytree_state, restored_state)
-
-

@@ -4,12 +4,14 @@ from typing import Sequence, Tuple
 import jax.random
 from jax import numpy as jnp
 
-import config
+from typing import Any
+
+import config as config_lib
 
 Shape = Sequence[int]
 
 
-class Init(config.Configurable):
+class Initializer:
     def initialize(
         self,
         name: str,
@@ -21,7 +23,25 @@ class Init(config.Configurable):
         raise NotImplementedError(type(self))
 
 
-class DefaultInit(Init):
+class ConstantInitializer(Initializer):
+
+    def __init__(self, value: Any):
+        self._value = value
+
+    def initialize(
+        self,
+        name: str,
+        *,
+        prng_key: jax.random.KeyArray,
+        shape: Shape,
+        dtype: jnp.dtype,
+    ) -> jnp.ndarray:
+        return jnp.full(shape=shape, fill_value=self._value, dtype=dtype)
+
+
+class DefaultInitializer(config_lib.Configurable, Initializer):
+    """The default initializer."""
+
     @classmethod
     def default_config(cls):
         cfg = super().default_config()

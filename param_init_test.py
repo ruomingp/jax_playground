@@ -5,12 +5,12 @@ import jax.numpy as jnp
 import numpy as np
 from absl.testing import absltest
 
-from param_init import DefaultInit
+from param_init import DefaultInitializer
 
 
 class DefaultInitTest(absltest.TestCase):
     def testBias(self):
-        init: DefaultInit = DefaultInit.default_config().instantiate()
+        init: DefaultInitializer = DefaultInitializer.default_config().instantiate()
         bias = init.initialize(
             "bias", prng_key=jax.random.PRNGKey(1), shape=[4], dtype=jnp.float16
         )
@@ -18,7 +18,7 @@ class DefaultInitTest(absltest.TestCase):
         np.testing.assert_array_equal(bias, jnp.zeros_like(bias))
 
     def testScale(self):
-        init: DefaultInit = DefaultInit.default_config().instantiate()
+        init: DefaultInitializer = DefaultInitializer.default_config().instantiate()
         scale = init.initialize(
             "scale", prng_key=jax.random.PRNGKey(1), shape=[4], dtype=jnp.bfloat16
         )
@@ -30,8 +30,8 @@ class DefaultInitTest(absltest.TestCase):
         for dist in ("uniform", "normal"):
             for gain in (1.0, 2.0):
                 for fan_type in ("fan_in", "fan_out", "xavier"):
-                    init: DefaultInit = (
-                        DefaultInit.default_config()
+                    init: DefaultInitializer = (
+                        DefaultInitializer.default_config()
                         .set(fan=fan_type, gain=gain, distribution=dist)
                         .instantiate()
                     )

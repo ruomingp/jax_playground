@@ -205,7 +205,7 @@ class ResNetModel(BaseLayer):
             1000,
             "The number of classification classes.",
         )
-        cfg.param_init = param_init.DefaultInit.default_config().set(
+        cfg.param_init = param_init.DefaultInitializer.default_config().set(
             # kaiming_normal_(mode='fan_out', nonlinearity='relu').
             fan="fan_out", distribution="normal", gain=math.sqrt(2))
         cfg.dtype = jnp.float32
