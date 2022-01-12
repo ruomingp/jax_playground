@@ -34,7 +34,9 @@ def _copy(src: jnp.ndarray, dst: torch.nn.Parameter):
         dst.copy_(src)
 
 
-def _initialize_parameters_recursively(prng_key: jax.random.KeyArray, layer: module.BaseLayer):
+def _initialize_parameters_recursively(
+    prng_key: jax.random.KeyArray, layer: module.BaseLayer
+):
     param_specs = layer.create_parameter_specs_recursively()
     params = layer.initialize_parameters_recursively(prng_key, param_specs)
     return param_specs, params
@@ -49,7 +51,9 @@ class LayerTest(parameterized.TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_param_specs, layer_params = _initialize_parameters_recursively(
+            init_key, layer
+        )
         self.assertEqual(dict(scale=(dim,), bias=(dim,)), _shapes(layer_param_specs))
         self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
 
@@ -90,7 +94,9 @@ class LayerTest(parameterized.TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_param_specs, layer_params = _initialize_parameters_recursively(
+            init_key, layer
+        )
         self.assertEqual(dict(scale=(dim,)), _shapes(layer_param_specs))
         self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
 
@@ -125,13 +131,14 @@ class LayerTest(parameterized.TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_param_specs, layer_params = _initialize_parameters_recursively(
+            init_key, layer
+        )
         self.assertEqual(
             dict(scale=(dim,), bias=(dim,), moving_mean=(dim,), moving_variance=(dim,)),
-            _shapes(layer_param_specs))
-        self.assertEqual(
             _shapes(layer_param_specs),
-            _shapes(layer_params))
+        )
+        self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
 
         # Random inputs.
         prng_key, input_key = jax.random.split(prng_key)
@@ -182,7 +189,9 @@ class LayerTest(parameterized.TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_param_specs, layer_params = _initialize_parameters_recursively(
+            init_key, layer
+        )
         self.assertEqual(
             dict(weight=(input_dim, output_dim), bias=(output_dim,)),
             _shapes(layer_param_specs),
@@ -225,10 +234,10 @@ class LayerTest(parameterized.TestCase):
         ("3x3_S2_PADDING1", (3, 3), (2, 2), (1, 1)),
     )
     def testConv2D(
-            self,
-            window: Tuple[int, int],
-            strides: Tuple[int, int],
-            padding: Union[str, Tuple[int, int]],
+        self,
+        window: Tuple[int, int],
+        strides: Tuple[int, int],
+        padding: Union[str, Tuple[int, int]],
     ):
         input_dim, output_dim = 4, 6
         if isinstance(padding, tuple):
@@ -248,7 +257,9 @@ class LayerTest(parameterized.TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_param_specs, layer_params = _initialize_parameters_recursively(
+            init_key, layer
+        )
         self.assertEqual(
             dict(
                 weight=(window[0], window[1], input_dim, output_dim), bias=(output_dim,)

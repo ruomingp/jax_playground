@@ -317,9 +317,7 @@ class InstantiableConfig(Config):
         config = InstantiableConfig(cls=fn)
         init_sig = inspect.signature(fn)
         for name, param in init_sig.parameters.items():
-            config.define(
-                name, param.default, f"The argument {name} for {fn}()."
-            )
+            config.define(name, param.default, f"The argument {name} for {fn}().")
         return config
 
     def instantiate(self, **kwargs) -> Any:

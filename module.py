@@ -27,7 +27,8 @@ import param_init
 from utils import NestedTensor, Tensor
 
 
-NestedPartitionSpec = Dict[str, Union[PartitionSpec, 'NestedPartitionSpec']]
+NestedPartitionSpec = Dict[str, Union[PartitionSpec, "NestedPartitionSpec"]]
+
 
 class FrozenDict(abc.Mapping):
     def __init__(self, *args, **kwargs):
@@ -70,9 +71,7 @@ class OutputCollection:
             raise ValueError(f"{name} already added as a child or output")
         self._all_names.add(name)
 
-    def add_value(
-            self, name: str, value: Any, *, section: str = SECTION_DEFAULT
-    ):
+    def add_value(self, name: str, value: Any, *, section: str = SECTION_DEFAULT):
         self._check_name(name)
         if section not in self._sections:
             self._sections[section] = {}
@@ -84,7 +83,7 @@ class OutputCollection:
         return self._children[name]
 
     def get_values_recursively(
-            self, section: str = SECTION_DEFAULT
+        self, section: str = SECTION_DEFAULT
     ) -> Dict[str, Union[jnp.ndarray, dict]]:
         results = {}
         if section in self._sections:
@@ -185,18 +184,6 @@ class Module(config_lib.Configurable):
     def default_config(cls):
         cfg = config_lib.InstantiableConfig(cls)
         cfg.define("name", "", "Name of this module.")
-        cfg.define(
-            "dtype",
-            None,
-            "If not None, the default parameter dtype. "
-            "If None, inherits from the parent module.",
-        )
-        cfg.define(
-            "param_init",
-            None,
-            "If not None, parameter initialization config of this module. "
-            "If None, inherits from the parent module.",
-        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional["Module"]):
@@ -204,14 +191,6 @@ class Module(config_lib.Configurable):
         if not cfg.name:
             raise ValueError(f"Module must have a name: {cfg.debug_string()}")
         self._parent = parent  # avoid adding parent to self._modules
-        cfg = self.config
-        if cfg.param_init is not None:
-            init = cfg.param_init.instantiate()
-        elif parent is None:
-            init = param_init.DefaultInitializer.default_config().instantiate()
-        else:
-            init = None
-        self._param_init = init
         self._children: Dict[str, "Module"] = {}
 
     def __getattr__(self, name: str) -> Any:
@@ -242,7 +221,7 @@ class Module(config_lib.Configurable):
         return f"{type(self)}@{self.path()}"
 
     def _add_child(
-            self, name: str, child_config: config_lib.Config, **kwargs
+        self, name: str, child_config: config_lib.Config, **kwargs
     ) -> "Module":
         if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
             raise ValueError(f'Invalid child name "{name}"')
@@ -327,10 +306,46 @@ class ParameterSpec:
     # The initializer of the param. If None, uses the layer's default initializer.
     initializer: Optional[param_init.Initializer] = None
 
-NestedParameterSpec = Dict[str, Union[ParameterSpec, 'NestedParameterSpec']]
+
+NestedParameterSpec = Dict[str, Union[ParameterSpec, "NestedParameterSpec"]]
 
 
 class BaseLayer(Module):
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define(
+            "dtype",
+            None,
+            "If not None, the default parameter dtype. "
+            "If None, inherits from the parent module.",
+        )
+        cfg.define(
+            "param_init",
+            None,
+            "If not None, parameter initialization config of this module. "
+            "If None, inherits from the parent module.",
+        )
+        cfg.define(
+            "param_partition_spec",
+            None,
+            "The partition spec for the layer parameters. "
+            "When the layer contains a weight parameter and a bias parameter, "
+            "the partition spec will be defined in terms of the weight parameter, "
+            "while the partition spec of the bias parameter can be derived accordingly.",
+        )
+        return cfg
+
+    def __init__(self, cfg: config_lib.Config, *, parent: Optional["Module"]):
+        super().__init__(cfg, parent=parent)
+        cfg = self.config
+        if cfg.param_init is not None:
+            init = cfg.param_init.instantiate()
+        elif parent is None:
+            init = param_init.DefaultInitializer.default_config().instantiate()
+        else:
+            init = None
+        self._param_init = init
 
     def dtype(self):
         if self.config.dtype is not None:
@@ -362,7 +377,9 @@ class BaseLayer(Module):
         return {}
 
     def initialize_parameters_recursively(
-            self, prng_key: jax.random.KeyArray, param_specs: Optional[NestedParameterSpec] = None
+        self,
+        prng_key: jax.random.KeyArray,
+        param_specs: Optional[NestedParameterSpec] = None,
     ) -> NestedTensor:
         if param_specs is None:
             param_specs = self.create_parameter_specs_recursively()
@@ -370,17 +387,17 @@ class BaseLayer(Module):
         for name, child in param_specs.items():
             prng_key, child_key = jax.random.split(prng_key)
             if isinstance(child, ParameterSpec):
-                params[name] = self._initialize_parameter(name, prng_key=child_key, parameter_spec=child)
+                params[name] = self._initialize_parameter(
+                    name, prng_key=child_key, parameter_spec=child
+                )
             else:
-                params[name] = self.initialize_parameters_recursively(prng_key=child_key, param_specs=child)
+                params[name] = self.initialize_parameters_recursively(
+                    prng_key=child_key, param_specs=child
+                )
         return params
 
     def _initialize_parameter(
-            self,
-            name: str,
-            *,
-            prng_key: jax.random.KeyArray,
-            parameter_spec: ParameterSpec
+        self, name: str, *, prng_key: jax.random.KeyArray, parameter_spec: ParameterSpec
     ) -> Tensor:
         """Adds a parameter with the given name and shape.
 
@@ -395,4 +412,8 @@ class BaseLayer(Module):
         if name in self._children:
             raise ValueError(f"Child {name} already exists.")
         return parameter_spec.initializer.initialize(
-            name, prng_key=prng_key, shape=parameter_spec.shape, dtype=parameter_spec.dtype)
+            name,
+            prng_key=prng_key,
+            shape=parameter_spec.shape,
+            dtype=parameter_spec.dtype,
+        )

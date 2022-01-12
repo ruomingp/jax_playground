@@ -17,7 +17,9 @@ import resnet
 from trainer import SpmdTrainer, SpmdEvaler
 
 
-flags.DEFINE_string("dir", )
+flags.DEFINE_string(
+    "dir",
+)
 
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
@@ -25,14 +27,17 @@ STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 
 
 class ImagenetInput(Module):
-
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("is_training", False, "Whether the examples are used for training.")
         cfg.define("split", "train", "The dataset split.")
         cfg.define("batch_size", None, "The batch size.")
-        cfg.define("shuffle_buffer_size", 4096, "The shuffle buffer size (only used when is_training=True).")
+        cfg.define(
+            "shuffle_buffer_size",
+            4096,
+            "The shuffle buffer size (only used when is_training=True).",
+        )
         cfg.define("shuffle_seed", None, "The shuffle seed.")
         cfg.define("prefetch_buffer_size", 1024, "The prefetch buffer size.")
         return cfg
@@ -41,11 +46,21 @@ class ImagenetInput(Module):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         ds: tf.data.Dataset = tfds.load(
-            name='imagenet2012', split=cfg.split, shuffle_files=cfg.is_training, try_gcs=True)
-        ds = ds.map(self._process_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            name="imagenet2012",
+            split=cfg.split,
+            shuffle_files=cfg.is_training,
+            try_gcs=True,
+        )
+        ds = ds.map(
+            self._process_image, num_parallel_calls=tf.data.experimental.AUTOTUNE
+        )
         if cfg.is_training:
             ds = ds.repeat()
-            ds = ds.shuffle(cfg.shuffle_buffer_size, seed=cfg.shuffle_seed, reshuffle_each_iteration=True)
+            ds = ds.shuffle(
+                cfg.shuffle_buffer_size,
+                seed=cfg.shuffle_seed,
+                reshuffle_each_iteration=True,
+            )
         ds = ds.prefetch(cfg.prefetch_buffer_size)
         ds = ds.batch(cfg.batch_size, drop_remainder=True)
         self._dataset = ds
@@ -72,16 +87,23 @@ def imagenet_trainer_config():
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
     cfg.input = ImagenetInput.default_config().set(
-        split='train', is_training=True, batch_size=train_batch_size)
+        split="train", is_training=True, batch_size=train_batch_size
+    )
     cfg.model = resnet.ResNetModel.resnet18_config()
     cfg.checkpointer.write_every_n_steps = steps_per_epoch
     cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
     evaler_train = SpmdEvaler.default_config().set(
-        name='evaler_train',
-        input=ImagenetInput.default_config().set(split='train[0:50000]', is_training=False, batch_size=eval_batch_size))
+        name="evaler_train",
+        input=ImagenetInput.default_config().set(
+            split="train[0:50000]", is_training=False, batch_size=eval_batch_size
+        ),
+    )
     evaler_validation = SpmdEvaler.default_config().set(
-        name='evaler_validation',
-        input=ImagenetInput.default_config().set(split='validation', is_training=False, batch_size=eval_batch_size))
+        name="evaler_validation",
+        input=ImagenetInput.default_config().set(
+            split="validation", is_training=False, batch_size=eval_batch_size
+        ),
+    )
     cfg.evalers = (evaler_train, evaler_validation)
 
     def learning_rate_schedule(step: int) -> float:
@@ -91,7 +113,9 @@ def imagenet_trainer_config():
     cfg.learner = learner.Learner.default_config().set(
         weight_decay=1e-4,
         optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(
-            learning_rate=learning_rate_schedule, momentum=0.9))
+            learning_rate=learning_rate_schedule, momentum=0.9
+        ),
+    )
     return cfg
 
 

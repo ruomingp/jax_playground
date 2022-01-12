@@ -184,14 +184,22 @@ class MultiheadAttentionTest(absltest.TestCase):
         )
         layer = cfg.instantiate(parent=None)
 
-        layer_params = layer.initialize_parameters_recursively(prng_key=jax.random.PRNGKey(123))
+        layer_params = layer.initialize_parameters_recursively(
+            prng_key=jax.random.PRNGKey(123)
+        )
         qkv_shapes = dict(
             weight=(model_dim, num_heads, per_head_dim), bias=(num_heads, per_head_dim)
         )
         self.assertEqual(
-            {**{f'{x}_proj': qkv_shapes for x in ('q', 'k', 'v')},
-             **{'o_proj': dict(weight=(model_dim, num_heads, per_head_dim), bias=(model_dim,)),
-                'dropout': {}}},
+            {
+                **{f"{x}_proj": qkv_shapes for x in ("q", "k", "v")},
+                **{
+                    "o_proj": dict(
+                        weight=(model_dim, num_heads, per_head_dim), bias=(model_dim,)
+                    ),
+                    "dropout": {},
+                },
+            },
             _shapes(layer_params),
         )
 
@@ -231,9 +239,9 @@ def _parameters_from_roberta_attention(src: hf_roberta.RobertaAttention):
     per_head_dim = src.self.attention_head_size
     results = {"attention": {}}
     for src_proj, dst_proj in (
-            ("query", "q_proj"),
-            ("key", "k_proj"),
-            ("value", "v_proj"),
+        ("query", "q_proj"),
+        ("key", "k_proj"),
+        ("value", "v_proj"),
     ):
         dense = getattr(src.self, src_proj)
         # Note that torch.nn.Linear.weight is (output_dim, input_dim), so we need to transpose it before reshaping.
@@ -256,7 +264,7 @@ def _parameters_from_dense(dense: torch.nn.Linear):
 
 
 def _parameters_from_roberta_feed_forward(
-        intermediate: hf_roberta.RobertaIntermediate, output: hf_roberta.RobertaOutput
+    intermediate: hf_roberta.RobertaIntermediate, output: hf_roberta.RobertaOutput
 ):
     return _to_jtensor(
         dict(
@@ -285,7 +293,7 @@ def _as_torch_tensor(src: jnp.ndarray):
 def _copy_parameters(src: Module, dst: Module):
     with jnp.no_grad():
         for (src_name, src_param), (dst_name, dst_param) in zip(
-                src.named_parameters(), dst.named_parameters()
+            src.named_parameters(), dst.named_parameters()
         ):
             assert src_name == dst_name, f"{src_name} != {dst_name}"
             dst_param.copy_(src_param)
@@ -310,7 +318,7 @@ def _copy_transformer_parameters(src: Module, dst: attention.TransformerLayer):
 
 class TransformerTest(absltest.TestCase):
     def _compare_against_roberta_attention(
-            self, ref: hf_roberta.RobertaAttention, layer: TransformerAttentionLayer
+        self, ref: hf_roberta.RobertaAttention, layer: TransformerAttentionLayer
     ):
         layer_params = layer.initialize_parameters_recursively(
             prng_key=jax.random.PRNGKey(0)
@@ -367,7 +375,7 @@ class TransformerTest(absltest.TestCase):
         self._compare_against_roberta_attention(ref, layer)
 
     def _compare_against_roberta_layer(
-            self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer
+        self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer
     ):
         layer_params = layer.initialize_parameters_recursively(
             prng_key=jax.random.PRNGKey(0)
@@ -421,7 +429,8 @@ class TransformerTest(absltest.TestCase):
         cfg = TransformerLayer.default_config().set(name="test", input_dim=model_dim)
         cfg.self_attention.set(structure="postnorm")
         cfg.feed_forward.set(structure="postnorm", activation="nn.silu")
-        cfg.feed_forward.linear.set(bias=True)
+        cfg.feed_forward.linear1.set(bias=True)
+        cfg.feed_forward.linear2.set(bias=True)
         cfg.self_attention.attention.set(num_heads=num_heads)
         cfg.self_attention.attention.input_linear.set(bias=True)
         cfg.self_attention.attention.output_linear.set(bias=True)

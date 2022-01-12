@@ -24,7 +24,6 @@ class Initializer:
 
 
 class ConstantInitializer(Initializer):
-
     def __init__(self, value: Any):
         self._value = value
 

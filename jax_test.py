@@ -48,6 +48,7 @@ class Point:
     def tree_unflatten(cls, aux_data, children):
         return cls(*children)
 
+
 print(jax.tree_map(lambda z: z + 1, Point(x=1, y=2)))
 
 Point = collections.namedtuple("Point", ("x", "y"))
@@ -56,8 +57,10 @@ print(jax.tree_map(lambda z: z + 1, Point(x=1, y=2)))
 Point = typing.NamedTuple("Point", (("x", int), ("y", int)))
 print(jax.tree_map(lambda z: z + 1, Point(x=1, y=2)))
 
+
 class Point(typing.NamedTuple):
     x: int
     y: int
+
 
 print(jax.tree_map(lambda z: z + 1, Point(x=1, y=2)))

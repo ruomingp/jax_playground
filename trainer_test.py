@@ -21,12 +21,15 @@ FLAGS = flags.FLAGS
 
 
 class DummyInput(Module):
-
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
-        cfg.define('batch_size', 4, 'The batch size.')
-        cfg.define('total_num_batches', None, 'The total number of batches. If None, unlimited.')
+        cfg.define("batch_size", 4, "The batch size.")
+        cfg.define(
+            "total_num_batches",
+            None,
+            "The total number of batches. If None, unlimited.",
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent=None):
@@ -41,20 +44,31 @@ class DummyInput(Module):
     def __next__(self):
         cfg = self.config
         self._num_batches += 1
-        if cfg.total_num_batches is not None and self._num_batches > cfg.total_num_batches:
+        if (
+            cfg.total_num_batches is not None
+            and self._num_batches > cfg.total_num_batches
+        ):
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
-        return dict(image=jax.random.randint(image_key, shape=[cfg.batch_size, 224, 224, 3], minval=0, maxval=256,
-                                             dtype=np.int32),
-                    label=jax.random.randint(label_key, shape=[cfg.batch_size], minval=0, maxval=1000, dtype=np.int32))
+        return dict(
+            image=jax.random.randint(
+                image_key,
+                shape=[cfg.batch_size, 224, 224, 3],
+                minval=0,
+                maxval=256,
+                dtype=np.int32,
+            ),
+            label=jax.random.randint(
+                label_key, shape=[cfg.batch_size], minval=0, maxval=1000, dtype=np.int32
+            ),
+        )
 
 
 class TrainerTest(parameterized.TestCase):
-
     @parameterized.parameters(
-        ('cpu', (1, 1)),
-        ('tpu', (8, 1)),
-        ('tpu', (2, 4)),
+        ("cpu", (1, 1)),
+        ("tpu", (8, 1)),
+        ("tpu", (2, 4)),
     )
     def testTrainer(self, platform, mesh_shape):
         trainer_dir = tempfile.mkdtemp()
@@ -63,10 +77,16 @@ class TrainerTest(parameterized.TestCase):
         cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
             optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(
-                learning_rate=0.1, momentum=0.9))
+                learning_rate=0.1, momentum=0.9
+            )
+        )
         evaler_cfg = SpmdEvaler.default_config().set(
-            name="eval_dummy", input=DummyInput.default_config().set(total_num_batches=2))
-        evaler_cfg.summary_writer.dir = os.path.join(trainer_dir, "summaries", evaler_cfg.name)
+            name="eval_dummy",
+            input=DummyInput.default_config().set(total_num_batches=2),
+        )
+        evaler_cfg.summary_writer.dir = os.path.join(
+            trainer_dir, "summaries", evaler_cfg.name
+        )
         cfg.evalers = [evaler_cfg]
         cfg.checkpointer.write_every_n_steps = 5
         cfg.checkpointer.dir = os.path.join(trainer_dir, "checkpoints")
@@ -74,9 +94,13 @@ class TrainerTest(parameterized.TestCase):
         run_trainer = lambda: self._runTrainer(cfg, num_steps=11)
         devices = jax.devices()
         if not all(device.platform == platform for device in devices):
-            logging.info('Skipping test for %s on %s', platform, [device.platform for device in devices])
+            logging.info(
+                "Skipping test for %s on %s",
+                platform,
+                [device.platform for device in devices],
+            )
             return
-        if platform == 'cpu':
+        if platform == "cpu":
             run_trainer()
         else:
             devices = mesh_utils.create_device_mesh(mesh_shape)

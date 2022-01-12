@@ -207,7 +207,10 @@ class ResNetModel(BaseLayer):
         )
         cfg.param_init = param_init.DefaultInitializer.default_config().set(
             # kaiming_normal_(mode='fan_out', nonlinearity='relu').
-            fan="fan_out", distribution="normal", gain=math.sqrt(2))
+            fan="fan_out",
+            distribution="normal",
+            gain=math.sqrt(2),
+        )
         cfg.dtype = jnp.float32
         return cfg
 
@@ -257,8 +260,14 @@ class ResNetModel(BaseLayer):
         x = self.conv1(image)
         x = self.norm1(x)
         x = jax.nn.relu(x)
-        x = jax.lax.reduce_window(x, init_value=-jnp.inf, computation=jax.lax.max, window_dimensions=(1, 3, 3, 1),
-                                  window_strides=(1, 2, 2, 1), padding=((0, 0), (1, 1), (1, 1), (0, 0)))
+        x = jax.lax.reduce_window(
+            x,
+            init_value=-jnp.inf,
+            computation=jax.lax.max,
+            window_dimensions=(1, 3, 3, 1),
+            window_strides=(1, 2, 2, 1),
+            padding=((0, 0), (1, 1), (1, 1), (0, 0)),
+        )
         for stage_i, num_blocks in enumerate(cfg.num_blocks_per_stage):
             x = getattr(self, f"stage{stage_i}")(x)
         # [batch, hidden].
@@ -275,4 +284,7 @@ class ResNetModel(BaseLayer):
         predictions = jnp.argmax(logits, axis=-1)
         num_examples = float(label.shape[0])
         accuracy = jnp.equal(predictions, label).sum() / num_examples
-        return loss, dict(accuracy=WeightedScalar(accuracy, num_examples), loss=WeightedScalar(loss, num_examples))
+        return loss, dict(
+            accuracy=WeightedScalar(accuracy, num_examples),
+            loss=WeightedScalar(loss, num_examples),
+        )

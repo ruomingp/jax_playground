@@ -61,8 +61,12 @@ class LayerNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
-            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
+            "scale": ParameterSpec(
+                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+            ),
+            "bias": ParameterSpec(
+                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+            ),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -90,7 +94,9 @@ class RMSNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
+            "scale": ParameterSpec(
+                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+            ),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -118,12 +124,24 @@ class BatchNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
-            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=PartitionSpec('model')),
-            "moving_mean": ParameterSpec(shape=[cfg.dim], dtype=jnp.float32, partition_spec=PartitionSpec('model'),
-                                         initializer=param_init.ConstantInitializer(0.)),
-            "moving_variance": ParameterSpec(shape=[cfg.dim], dtype=jnp.float32, partition_spec=PartitionSpec('model'),
-                                             initializer=param_init.ConstantInitializer(1.)),
+            "scale": ParameterSpec(
+                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+            ),
+            "bias": ParameterSpec(
+                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+            ),
+            "moving_mean": ParameterSpec(
+                shape=[cfg.dim],
+                dtype=jnp.float32,
+                partition_spec=PartitionSpec("model"),
+                initializer=param_init.ConstantInitializer(0.0),
+            ),
+            "moving_variance": ParameterSpec(
+                shape=[cfg.dim],
+                dtype=jnp.float32,
+                partition_spec=PartitionSpec("model"),
+                initializer=param_init.ConstantInitializer(1.0),
+            ),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -161,18 +179,22 @@ class Linear(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
-        cfg.define("param_partition_spec", PartitionSpec(None, None),
-                   "The partition spec for the weight [input_dim, output_dim], e.g.,"
-                   "PartitionSpec(None, 'model').")
+        cfg.param_partition_spec = PartitionSpec(None, None)
         return cfg
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         params = dict(
-            weight=ParameterSpec(shape=(cfg.input_dim, cfg.output_dim), partition_spec=cfg.param_partition_spec))
+            weight=ParameterSpec(
+                shape=(cfg.input_dim, cfg.output_dim),
+                partition_spec=cfg.param_partition_spec,
+            )
+        )
         if cfg.bias:
-            params["bias"] = ParameterSpec(shape=[cfg.output_dim],
-                                           partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
+            params["bias"] = ParameterSpec(
+                shape=[cfg.output_dim],
+                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]),
+            )
         return params
 
     def forward(self, x: Tensor) -> Tensor:
@@ -197,9 +219,7 @@ class Conv2D(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
-        cfg.define("param_partition_spec", PartitionSpec(None, None, None, None),
-                   "The partition spec for the weight [H, W, input_dim, output_dim], e.g.,"
-                   "PartitionSpec(None, None, None, 'model').")
+        cfg.param_partition_spec = PartitionSpec(None, None, None, None)
         return cfg
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
@@ -213,19 +233,26 @@ class Conv2D(BaseLayer):
                 raise NotImplementedError("Negative padding is not supported")
         params = dict(
             weight=ParameterSpec(
-                shape=list(cfg.window) + [cfg.input_dim, cfg.output_dim], partition_spec=cfg.param_partition_spec)
+                shape=list(cfg.window) + [cfg.input_dim, cfg.output_dim],
+                partition_spec=cfg.param_partition_spec,
+            )
         )
         if cfg.bias:
-            params["bias"] = ParameterSpec(shape=[cfg.output_dim],
-                                           partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
+            params["bias"] = ParameterSpec(
+                shape=[cfg.output_dim],
+                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]),
+            )
         return params
 
     def forward(self, x: Tensor) -> Tensor:
         cfg = self.config
-        return jax.lax.conv_general_dilated(
-            lhs=x,
-            rhs=self.parameters["weight"],
-            window_strides=cfg.strides,
-            dimension_numbers=("NHWC", "HWIO", "NHWC"),
-            padding=cfg.padding,
-        ) + self.parameters.get("bias", 0)
+        return (
+            jax.lax.conv_general_dilated(
+                lhs=x,
+                rhs=self.parameters["weight"],
+                window_strides=cfg.strides,
+                dimension_numbers=("NHWC", "HWIO", "NHWC"),
+                padding=cfg.padding,
+            )
+            + self.parameters.get("bias", 0)
+        )

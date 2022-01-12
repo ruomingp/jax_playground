@@ -4,21 +4,27 @@ from typing import Dict, Mapping, Sequence, TypeVar, Union
 
 
 Tensor = jnp.ndarray
-NestedTensor = Dict[str, Union[Tensor, 'NestedTensor']]
+NestedTensor = Dict[str, Union[Tensor, "NestedTensor"]]
 
 
-def tree_paths(tree, separator='/'):
+def tree_paths(tree, separator="/"):
     def _concat(prefix, suffix):
-        return f'{prefix}{separator}{suffix}' if suffix else f'{prefix}'
+        return f"{prefix}{separator}{suffix}" if suffix else f"{prefix}"
 
     if isinstance(tree, Mapping):
-        return {k: jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in tree.items()}
+        return {
+            k: jax.tree_map(lambda value: _concat(k, value), tree_paths(v))
+            for k, v in tree.items()
+        }
     elif is_named_tuple(tree):
         return tree_paths(tree._asdict())
     elif isinstance(tree, Sequence):
-        return [jax.tree_map(lambda value: _concat(k, value), tree_paths(v)) for k, v in enumerate(tree)]
+        return [
+            jax.tree_map(lambda value: _concat(k, value), tree_paths(v))
+            for k, v in enumerate(tree)
+        ]
     else:
-        return ''
+        return ""
 
 
 def is_named_tuple(x):
