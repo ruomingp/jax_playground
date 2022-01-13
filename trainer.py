@@ -128,11 +128,6 @@ class SpmdTrainer(_SpmdRunner):
             model=model_param_partition_specs,
             learner=learner_state_partition_specs,
         )
-
-    def run(self, prng_key: jax.random.KeyArray, max_step: int):
-        prng_key, init_key = jax.random.split(prng_key)
-        self._init(init_key)
-
         self._jit_train_step = self._jit(
             self._train_step,
             in_axis_resources=(
@@ -142,6 +137,10 @@ class SpmdTrainer(_SpmdRunner):
             ),
             out_axis_resources=None,
         )
+
+    def run(self, prng_key: jax.random.KeyArray, max_step: int):
+        prng_key, init_key = jax.random.split(prng_key)
+        self._init(init_key)
 
         for step in range(1, max_step + 1):
             prng_key, step_key = jax.random.split(prng_key)
