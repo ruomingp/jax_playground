@@ -30,7 +30,7 @@ class Downsample(BaseLayer):
         cfg.define("stride", 1, "The convolution stride.")
         cfg.define(
             "conv",
-            Conv2D.default_config().set(window=(3, 3), bias=False),
+            Conv2D.default_config().set(window=(3, 3), bias=False, param_partition_spec=(None, None, None, "model")),
             "The convolution layer config.",
         )
         cfg.define(
@@ -71,7 +71,8 @@ class BasicBlock(BaseLayer):
         cfg.define(
             "conv",
             Conv2D.default_config().set(
-                window=(3, 3), bias=False, padding=((1, 1), (1, 1))
+                window=(3, 3), bias=False, padding=((1, 1), (1, 1)),
+                param_partition_spec=(None, None, None, "model"),
             ),
             "The convolution layer config.",
         )
@@ -206,7 +207,7 @@ class ResNetModel(BaseLayer):
             "The number of classification classes.",
         )
         cfg.param_init = param_init.DefaultInitializer.default_config().set(
-            # kaiming_normal_(mode='fan_out', nonlinearity='relu').
+            # Equivalent to kaiming_normal_(mode='fan_out', nonlinearity='relu').
             fan="fan_out",
             distribution="normal",
             gain=math.sqrt(2),
@@ -233,6 +234,7 @@ class ResNetModel(BaseLayer):
                 input_dim=3,
                 output_dim=hidden_dim,
                 bias=False,
+                param_partition_spec=(None, None, None, "model")
             ),
         )
         self._add_child("norm1", cfg.norm.set(dim=hidden_dim))
@@ -250,7 +252,8 @@ class ResNetModel(BaseLayer):
         self._add_child(
             "fc",
             layers.Linear.default_config().set(
-                input_dim=hidden_dim, output_dim=cfg.num_classes, bias=True
+                input_dim=hidden_dim, output_dim=cfg.num_classes, bias=True,
+                param_partition_spec=("model", None)
             ),
         )
 
