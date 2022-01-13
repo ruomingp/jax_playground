@@ -179,7 +179,8 @@ class Linear(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
-        cfg.param_partition_spec = PartitionSpec(None, None)
+        # cfg.param_partition_spec = PartitionSpec(None, None)
+        cfg.param_partition_spec = (None, None)
         return cfg
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
@@ -216,7 +217,8 @@ class Conv2D(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
-        cfg.param_partition_spec = PartitionSpec(None, None, None, None)
+        # cfg.param_partition_spec = PartitionSpec(None, None, None, None)
+        cfg.param_partition_spec = (None, None, None, None)
         return cfg
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:

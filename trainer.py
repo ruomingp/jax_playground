@@ -116,7 +116,7 @@ class SpmdTrainer(_SpmdRunner):
         self._model_param_specs = self.model.create_parameter_specs_recursively()
         logging.info("Model param specs: %s", self._model_param_specs)
         model_param_partition_specs = jax.tree_map(
-            lambda spec: spec.partition_spec, self._model_param_specs
+            lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
         )
         # for path, spec in flatten_items(model_param_partition_specs):
         #     logging.info("Model param partition: %s=%s", path, spec)
