@@ -26,7 +26,6 @@ import config as config_lib
 import param_init
 from utils import NestedTensor, Tensor
 
-
 NestedPartitionSpec = Dict[str, Union[PartitionSpec, "NestedPartitionSpec"]]
 
 
@@ -83,7 +82,7 @@ class OutputCollection:
         return self._children[name]
 
     def get_values_recursively(
-        self, section: str = SECTION_DEFAULT
+            self, section: str = SECTION_DEFAULT
     ) -> Dict[str, Union[jnp.ndarray, dict]]:
         results = {}
         if section in self._sections:
@@ -222,7 +221,7 @@ class Module(config_lib.Configurable):
         return f"{type(self)}@{self.path()}"
 
     def _add_child(
-        self, name: str, child_config: config_lib.Config, **kwargs
+            self, name: str, child_config: config_lib.Config, **kwargs
     ) -> "Module":
         if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
             raise ValueError(f'Invalid child name "{name}"')
@@ -296,6 +295,17 @@ class Module(config_lib.Configurable):
             with child_context(self.config.name):
                 return f()
         raise ValueError("context.module does not match self")
+
+
+def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTensor, inputs: Dict[str, Any], *,
+               method: str = "forward", is_training: bool, output_collection_sections=tuple()) -> Tuple[
+    Any, Dict[str, NestedTensor]]:
+    context = module.make_invocation_context(is_training=is_training, prng_key=prng_key, state=state)
+    with root_context(context):
+        method_outputs = getattr(module, method)(**inputs)
+    output_collections = {section: context.output_collection.get_values_recursively(section) for section in
+                          output_collection_sections}
+    return method_outputs, output_collections
 
 
 @dataclasses.dataclass
@@ -378,9 +388,9 @@ class BaseLayer(Module):
         return {}
 
     def initialize_parameters_recursively(
-        self,
-        prng_key: jax.random.KeyArray,
-        param_specs: Optional[NestedParameterSpec] = None,
+            self,
+            prng_key: jax.random.KeyArray,
+            param_specs: Optional[NestedParameterSpec] = None,
     ) -> NestedTensor:
         if param_specs is None:
             param_specs = self.create_parameter_specs_recursively()
@@ -398,7 +408,7 @@ class BaseLayer(Module):
         return params
 
     def _initialize_parameter(
-        self, name: str, *, prng_key: jax.random.KeyArray, parameter_spec: ParameterSpec
+            self, name: str, *, prng_key: jax.random.KeyArray, parameter_spec: ParameterSpec
     ) -> Tensor:
         """Adds a parameter with the given name and shape.
 

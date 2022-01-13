@@ -198,52 +198,44 @@ class SpmdTrainer(_SpmdRunner):
         self.checkpointer.save(step=step, state=self._state)
 
     def _train_step(
-        self,
-        prng_key: jax.random.KeyArray,
-        state: _TrainerState,
-        input_batch: Dict[str, Any],
+            self,
+            prng_key: jax.random.KeyArray,
+            state: _TrainerState,
+            input_batch: Dict[str, Any],
     ):
         prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
 
         def _forward(model_parameters, input_batch):
-            forward_context: InvocationContext = self.model.make_invocation_context(
-                state=model_parameters, is_training=True, prng_key=forward_key
-            )
-            with module.root_context(forward_context):
-                loss, aux = self.model(**input_batch)
-            return loss, dict(
-                aux=aux,
-                parameter_updates=forward_context.get_state_updates(),
-                summaries=forward_context.get_summaries(),
-            )
+            (loss, aux), model_output_collection = module.functional(
+                self.model, state=model_parameters, is_training=True, prng_key=forward_key, inputs=input_batch,
+                output_collection_sections=("summaries", "state_updates"))
+            return loss, dict(aux=aux, **model_output_collection)
 
         _forward_and_grad = jax.value_and_grad(_forward, has_aux=True)
-        (loss, forward_outputs), grads = _forward_and_grad(
+        (loss, forward_output_collection), grads = _forward_and_grad(
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
-        learner_context: InvocationContext = self.learner.make_invocation_context(
-            state=None, is_training=True, prng_key=learner_key
-        )
-        with module.root_context(learner_context):
-            updated_learner_state, updated_model_params = self.learner.update(
-                state.learner, model_params=state.model, gradients=grads
-            )
+        (updated_learner_state, updated_model_params), learner_output_collection = module.functional(
+            self.learner, method="update",
+            state=None, is_training=True, prng_key=learner_key,
+            inputs=dict(state=state.learner, model_params=state.model, gradients=grads),
+            output_collection_sections=["summaries"])
         updated_state = _TrainerState(
             model=_apply_updates(
-                updated_model_params, forward_outputs["parameter_updates"]
+                updated_model_params, forward_output_collection["state_updates"]
             ),
             learner=updated_learner_state,
         )
         # TODO(ruoming): only retrieve summaries when necessary.
         summaries = dict(
-            model=forward_outputs["summaries"], learner=learner_context.get_summaries()
+            model=forward_output_collection["summaries"], learner=learner_output_collection["summaries"],
         )
         return dict(
             state=updated_state,
             summaries=summaries,
             loss=loss,
-            aux=forward_outputs["aux"],
+            aux=forward_output_collection["aux"],
         )
 
 
@@ -260,18 +252,18 @@ class SpmdEvaler(_SpmdRunner):
         return cfg
 
     def run_step(
-        self,
-        step: int,
-        prng_key: jax.random.KeyArray,
-        *,
-        model: Module,
-        model_params: NestedTensor
+            self,
+            step: int,
+            prng_key: jax.random.KeyArray,
+            *,
+            model: Module,
+            model_params: NestedTensor
     ):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
             return
         _jit_eval_batch = self._jit(
-            partial(self._eval_batch, model),
+            partial(module.functional, model, is_training=False, output_collection_sections=["summaries"]),
             in_axis_resources=(
                 None,  # prng_key
                 self._parameter_sharding(),
@@ -284,11 +276,11 @@ class SpmdEvaler(_SpmdRunner):
         num_batches = 0
         for input_batch in self.input:
             prng_key, batch_key = jax.random.split(prng_key)
-            outputs = _jit_eval_batch(batch_key, model_params, input_batch)
+            (_, aux), output_collection = _jit_eval_batch(batch_key, model_params, input_batch)
             if num_batches == 0:
-                self.summary_writer(step, outputs["summaries"])
+                self.summary_writer(step, output_collection["summaries"])
             num_batches += 1
-            metric_accumulator.update(input_batch, outputs["aux"])
+            metric_accumulator.update(input_batch, aux)
         summaries = metric_accumulator.summaries()
         logging.info(
             "Process % 3d step % 8d: %s.metrics=%s",
@@ -298,17 +290,3 @@ class SpmdEvaler(_SpmdRunner):
             summaries,
         )
         self.summary_writer(step, summaries)
-
-    def _eval_batch(
-        self,
-        model: Module,
-        prng_key: jax.random.KeyArray,
-        model_params: NestedTensor,
-        input_batch: Dict[str, Any],
-    ):
-        forward_context: InvocationContext = model.make_invocation_context(
-            state=model_params, is_training=False, prng_key=prng_key
-        )
-        with module.root_context(forward_context):
-            _, aux = model(**input_batch)
-        return dict(aux=aux, summaries=forward_context.get_summaries())
