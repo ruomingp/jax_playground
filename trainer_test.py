@@ -67,7 +67,7 @@ class DummyInput(Module):
 class TrainerTest(parameterized.TestCase):
     @parameterized.parameters(
         ("cpu", (1, 1)),
-        # ("tpu", (8, 1)),
+        ("tpu", (8, 1)),
         ("tpu", (2, 4)),
     )
     def testTrainer(self, platform, mesh_shape):

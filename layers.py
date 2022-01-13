@@ -152,11 +152,11 @@ class BatchNorm(BaseLayer):
         if self.is_training:
             mean = jnp.mean(x, axis=reduction_axis, keepdims=True)
             variance = jnp.mean((x - mean) ** 2, axis=reduction_axis, keepdims=True)
-            self.add_parameter_update(
+            self.add_state_update(
                 "moving_mean",
                 cfg.decay * self.parameters["moving_mean"] + (1 - cfg.decay) * mean,
             )
-            self.add_parameter_update(
+            self.add_state_update(
                 "moving_variance",
                 cfg.decay * self.parameters["moving_variance"]
                 + (1 - cfg.decay) * variance,

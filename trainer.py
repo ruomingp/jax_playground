@@ -213,7 +213,7 @@ class SpmdTrainer(_SpmdRunner):
                 loss, aux = self.model(**input_batch)
             return loss, dict(
                 aux=aux,
-                parameter_updates=forward_context.get_parameter_updates(),
+                parameter_updates=forward_context.get_state_updates(),
                 summaries=forward_context.get_summaries(),
             )
 

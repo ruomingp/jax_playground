@@ -150,7 +150,7 @@ class LayerTest(parameterized.TestCase):
                 is_training=is_training, state=layer_params, prng_key=prng_key
             )
             outputs = layer(inputs, context=context)
-            param_updates = context.get_parameter_updates()
+            param_updates = context.get_state_updates()
             if is_training:
                 # The output mean should be close to 0.
                 output_mean = jnp.mean(outputs, axis=(0, 1), keepdims=True)

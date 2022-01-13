@@ -57,7 +57,7 @@ class OutputCollection:
     # Some standard section names.
     SECTION_DEFAULT = ""
     SECTION_SUMMARY = "summary"
-    SECTION_PARAMETER_UPDATE = "parameter_update"
+    SECTION_STATE_UPDATE = "state_update"
 
     def __init__(self):
         self._all_names: Set[str] = set()
@@ -133,9 +133,9 @@ class InvocationContext:
             OutputCollection.SECTION_SUMMARY
         )
 
-    def get_parameter_updates(self):
+    def get_state_updates(self):
         return self.output_collection.get_values_recursively(
-            OutputCollection.SECTION_PARAMETER_UPDATE
+            OutputCollection.SECTION_STATE_UPDATE
         )
 
 
@@ -266,9 +266,9 @@ class Module(config_lib.Configurable):
             name, value, section=OutputCollection.SECTION_SUMMARY
         )
 
-    def add_parameter_update(self, name: str, value: jnp.ndarray):
+    def add_state_update(self, name: str, value: jnp.ndarray):
         return self.get_invocation_context().output_collection.add_value(
-            name, value, section=OutputCollection.SECTION_PARAMETER_UPDATE
+            name, value, section=OutputCollection.SECTION_STATE_UPDATE
         )
 
     def __call__(self, *args, method="forward", context=None, **kwargs) -> Any:
