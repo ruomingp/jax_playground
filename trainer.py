@@ -15,7 +15,7 @@ import metrics
 import module
 import summary_writer
 from module import InvocationContext, Module, NestedTensor
-from utils import tree_paths
+from utils import tree_paths, flatten_items
 
 
 def _apply_updates(base, updates):
@@ -114,14 +114,18 @@ class SpmdTrainer(_SpmdRunner):
             self._add_child(evaler_cfg.name, evaler_cfg)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
+        logging.info("Model param specs: %s", self._model_param_specs)
         model_param_partition_specs = jax.tree_map(
             lambda spec: spec.partition_spec, self._model_param_specs
         )
+        # for path, spec in flatten_items(model_param_partition_specs):
+        #     logging.info("Model param partition: %s=%s", path, spec)
+        logging.info("Model param partition: %s", model_param_partition_specs)
         learner_state_partition_specs = self.learner.create_state_partition_specs(
             model_param_partition_specs
         )
         self._trainer_state_partition_specs = _TrainerState(
-            model=self._model_param_specs,
+            model=model_param_partition_specs,
             learner=learner_state_partition_specs,
         )
 

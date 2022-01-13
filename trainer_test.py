@@ -73,7 +73,7 @@ class TrainerTest(parameterized.TestCase):
     def testTrainer(self, platform, mesh_shape):
         trainer_dir = tempfile.mkdtemp()
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
-        cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=4)
+        cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=4, num_blocks_per_stage=[1])
         cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
             optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(

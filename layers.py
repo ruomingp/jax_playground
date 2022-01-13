@@ -187,14 +187,11 @@ class Linear(BaseLayer):
         params = dict(
             weight=ParameterSpec(
                 shape=(cfg.input_dim, cfg.output_dim),
-                partition_spec=cfg.param_partition_spec,
-            )
-        )
+                partition_spec=cfg.param_partition_spec))
         if cfg.bias:
             params["bias"] = ParameterSpec(
                 shape=[cfg.output_dim],
-                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]),
-            )
+                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
         return params
 
     def forward(self, x: Tensor) -> Tensor:
@@ -234,14 +231,11 @@ class Conv2D(BaseLayer):
         params = dict(
             weight=ParameterSpec(
                 shape=list(cfg.window) + [cfg.input_dim, cfg.output_dim],
-                partition_spec=cfg.param_partition_spec,
-            )
-        )
+                partition_spec=cfg.param_partition_spec))
         if cfg.bias:
             params["bias"] = ParameterSpec(
                 shape=[cfg.output_dim],
-                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]),
-            )
+                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
         return params
 
     def forward(self, x: Tensor) -> Tensor:

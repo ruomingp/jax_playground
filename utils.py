@@ -9,22 +9,26 @@ NestedTensor = Dict[str, Union[Tensor, "NestedTensor"]]
 
 def tree_paths(tree, separator="/"):
     def _concat(prefix, suffix):
-        return f"{prefix}{separator}{suffix}" if suffix else f"{prefix}"
+        return f"{prefix}{separator}{suffix}" if prefix else f"{suffix}"
 
-    if isinstance(tree, Mapping):
-        return {
-            k: jax.tree_map(lambda value: _concat(k, value), tree_paths(v))
-            for k, v in tree.items()
-        }
-    elif is_named_tuple(tree):
-        return tree_paths(tree._asdict())
-    elif isinstance(tree, Sequence):
-        return [
-            jax.tree_map(lambda value: _concat(k, value), tree_paths(v))
-            for k, v in enumerate(tree)
-        ]
-    else:
-        return ""
+    def visit(tree, prefix):
+        if isinstance(tree, Mapping):
+            return {
+                k: visit(v, _concat(prefix, k)) for k, v in tree.items()
+            }
+        elif is_named_tuple(tree):
+            return visit(tree._asdict(), prefix)
+        elif isinstance(tree, Sequence):
+            return [visit(v, _concat(prefix, k)) for k, v in enumerate(tree)]
+        else:
+            return prefix
+
+    return visit(tree, "")
+
+
+def flatten_items(tree):
+    paths = tree_paths(tree)
+    return zip(jax.tree_flatten(paths), jax.tree_flatten(tree))
 
 
 def is_named_tuple(x):
