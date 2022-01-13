@@ -14,7 +14,7 @@ import learner
 import metrics
 import module
 import summary_writer
-from module import InvocationContext, Module, NestedTensor
+from module import functional as F, Module, NestedTensor
 from utils import tree_paths, flatten_items
 
 
@@ -206,7 +206,7 @@ class SpmdTrainer(_SpmdRunner):
         prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
 
         def _forward(model_parameters, input_batch):
-            (loss, aux), model_output_collection = module.functional(
+            (loss, aux), model_output_collection = F(
                 self.model, state=model_parameters, is_training=True, prng_key=forward_key, inputs=input_batch,
                 output_collection_sections=("summaries", "state_updates"))
             return loss, dict(aux=aux, **model_output_collection)
@@ -216,7 +216,7 @@ class SpmdTrainer(_SpmdRunner):
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
-        (updated_learner_state, updated_model_params), learner_output_collection = module.functional(
+        (updated_learner_state, updated_model_params), learner_output_collection = F(
             self.learner, method="update",
             state=None, is_training=True, prng_key=learner_key,
             inputs=dict(state=state.learner, model_params=state.model, gradients=grads),
@@ -263,7 +263,7 @@ class SpmdEvaler(_SpmdRunner):
         if step % cfg.run_every_n_steps != 0:
             return
         _jit_eval_batch = self._jit(
-            partial(module.functional, model, is_training=False, output_collection_sections=["summaries"]),
+            partial(F, model, is_training=False, output_collection_sections=["summaries"]),
             in_axis_resources=(
                 None,  # prng_key
                 self._parameter_sharding(),
