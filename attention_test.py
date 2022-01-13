@@ -210,7 +210,7 @@ class MultiheadAttentionTest(absltest.TestCase):
         value = jnp.asarray(rng.random([batch_size, src_len, model_dim]))
         mask = jnp.ones([batch_size, tgt_len, src_len], dtype=jnp.bool_)
         context = layer.make_invocation_context(
-            parameters=layer_params, is_training=True, prng_key=jax.random.PRNGKey(456)
+            state=layer_params, is_training=True, prng_key=jax.random.PRNGKey(456)
         )
         layer_outputs = layer(
             query=query, key=key, value=value, mask=mask, context=context
@@ -324,7 +324,7 @@ class TransformerTest(absltest.TestCase):
             prng_key=jax.random.PRNGKey(0)
         )
         layer_param_shapes = jax.tree_map(lambda x: x.shape, layer_params)
-        print(f"layer parameters={layer_param_shapes}")
+        print(f"layer state={layer_param_shapes}")
         layer_params = _parameters_from_roberta_attention(ref)
         batch_size, tgt_len = 2, 6
         model_dim, num_heads = layer.config.target_dim, layer.config.attention.num_heads
@@ -339,7 +339,7 @@ class TransformerTest(absltest.TestCase):
                 target=jnp.asarray(target),
                 mask=mask,
                 context=layer.make_invocation_context(
-                    parameters=layer_params,
+                    state=layer_params,
                     is_training=True,
                     prng_key=jax.random.PRNGKey(0),
                 ),
@@ -381,7 +381,7 @@ class TransformerTest(absltest.TestCase):
             prng_key=jax.random.PRNGKey(0)
         )
         layer_param_shapes = jax.tree_map(lambda x: x.shape, layer_params)
-        print(f"layer parameters={layer_param_shapes}")
+        print(f"layer state={layer_param_shapes}")
         layer_params = _parameters_from_roberta_layer(ref)
         batch_size, tgt_len = 2, 6
         model_dim, num_heads = (
@@ -396,7 +396,7 @@ class TransformerTest(absltest.TestCase):
             if mask is not None:
                 mask = mask[None, None, :, :].tile((batch_size, num_heads, 1, 1))
             context = layer.make_invocation_context(
-                parameters=layer_params,
+                state=layer_params,
                 is_training=True,
                 prng_key=jax.random.PRNGKey(0),
             )

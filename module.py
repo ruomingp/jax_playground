@@ -98,7 +98,8 @@ class OutputCollection:
 @dataclass
 class InvocationContext:
     module: "Module"
-    parameters: NestedTensor
+    # The state of the module.
+    state: NestedTensor
     is_training: bool
     prng_key: jax.random.KeyArray
     output_collection: OutputCollection
@@ -116,14 +117,14 @@ class InvocationContext:
         assert kwargs["module"] is self.module
         return InvocationContext(**kwargs)
 
-    def add_child(self, name: str, *, parameters=None) -> "InvocationContext":
+    def add_child(self, name: str, *, state=None) -> "InvocationContext":
         self.prng_key, child_key = jax.random.split(self.prng_key)
-        parameters = parameters or self.parameters.get(name)
+        state = state or self.state.get(name)
         return InvocationContext(
             module=getattr(self.module, name),
             is_training=self.is_training,
             prng_key=child_key,
-            parameters=parameters,
+            state=state,
             output_collection=self.output_collection.add_child(name),
         )
 
@@ -257,8 +258,8 @@ class Module(config_lib.Configurable):
         return self.get_invocation_context().is_training
 
     @property
-    def parameters(self):
-        return self.get_invocation_context().parameters
+    def state(self):
+        return self.get_invocation_context().state
 
     def add_summary(self, name: str, value: jnp.ndarray):
         return self.get_invocation_context().output_collection.add_value(
@@ -417,3 +418,7 @@ class BaseLayer(Module):
             shape=parameter_spec.shape,
             dtype=parameter_spec.dtype,
         )
+
+    @property
+    def parameters(self):
+        return self.state

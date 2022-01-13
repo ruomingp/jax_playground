@@ -207,7 +207,7 @@ class SpmdTrainer(_SpmdRunner):
 
         def _forward(model_parameters, input_batch):
             forward_context: InvocationContext = self.model.make_invocation_context(
-                parameters=model_parameters, is_training=True, prng_key=forward_key
+                state=model_parameters, is_training=True, prng_key=forward_key
             )
             with module.root_context(forward_context):
                 loss, aux = self.model(**input_batch)
@@ -223,7 +223,7 @@ class SpmdTrainer(_SpmdRunner):
         )
 
         learner_context: InvocationContext = self.learner.make_invocation_context(
-            parameters=None, is_training=True, prng_key=learner_key
+            state=None, is_training=True, prng_key=learner_key
         )
         with module.root_context(learner_context):
             updated_learner_state, updated_model_params = self.learner.update(
@@ -307,7 +307,7 @@ class SpmdEvaler(_SpmdRunner):
         input_batch: Dict[str, Any],
     ):
         forward_context: InvocationContext = model.make_invocation_context(
-            parameters=model_params, is_training=False, prng_key=prng_key
+            state=model_params, is_training=False, prng_key=prng_key
         )
         with module.root_context(forward_context):
             _, aux = model(**input_batch)

@@ -63,7 +63,7 @@ class LayerTest(parameterized.TestCase):
         inputs = orig_inputs.copy()
 
         context = layer.make_invocation_context(
-            is_training=True, parameters=layer_params, prng_key=prng_key
+            is_training=True, state=layer_params, prng_key=prng_key
         )
         outputs = layer(inputs, context=context)
         # forward() should not mutate 'inputs' in-place.
@@ -78,7 +78,7 @@ class LayerTest(parameterized.TestCase):
         # Set scales to 2.
         layer_params2 = copy.deepcopy(layer_params)
         layer_params2["scale"] *= 2
-        outputs = layer(inputs, context=context.clone(parameters=layer_params2))
+        outputs = layer(inputs, context=context.clone(state=layer_params2))
         # The output mean should be close to 0.
         output_mean = outputs.mean(axis=-1, keepdims=True)
         _assert_allclose(output_mean, np.zeros_like(output_mean))
@@ -106,7 +106,7 @@ class LayerTest(parameterized.TestCase):
         inputs = orig_inputs.copy()
 
         context = layer.make_invocation_context(
-            is_training=True, parameters=layer_params, prng_key=prng_key
+            is_training=True, state=layer_params, prng_key=prng_key
         )
         outputs = layer(inputs, context=context)
         # forward() should not mutate 'inputs' in-place.
@@ -118,7 +118,7 @@ class LayerTest(parameterized.TestCase):
         # Set scales to 2.
         layer_params2 = copy.deepcopy(layer_params)
         layer_params2["scale"] *= 2
-        outputs = layer(inputs, context=context.clone(parameters=layer_params2))
+        outputs = layer(inputs, context=context.clone(state=layer_params2))
         output_norm = jnp.sqrt((outputs ** 2).sum(axis=-1))
         # The output_norm should be close to 2 * sqrt(dim).
         _assert_allclose(output_norm, np.ones_like(output_norm) * 2.0 * math.sqrt(dim))
@@ -147,7 +147,7 @@ class LayerTest(parameterized.TestCase):
 
         for is_training in (True, False):
             context = layer.make_invocation_context(
-                is_training=is_training, parameters=layer_params, prng_key=prng_key
+                is_training=is_training, state=layer_params, prng_key=prng_key
             )
             outputs = layer(inputs, context=context)
             param_updates = context.get_parameter_updates()
@@ -211,7 +211,7 @@ class LayerTest(parameterized.TestCase):
 
         # Compute layer outputs.
         context = layer.make_invocation_context(
-            is_training=True, parameters=layer_params, prng_key=prng_key
+            is_training=True, state=layer_params, prng_key=prng_key
         )
         outputs = layer(inputs, context=context)
 
@@ -280,7 +280,7 @@ class LayerTest(parameterized.TestCase):
 
         # Compute layer outputs.
         context = layer.make_invocation_context(
-            is_training=True, parameters=layer_params, prng_key=prng_key
+            is_training=True, state=layer_params, prng_key=prng_key
         )
         outputs = layer(inputs, context=context)
 

@@ -8,7 +8,7 @@ from jax import numpy as jnp
 import config as config_lib
 import param_init
 from layers import check_numerics, LayerNorm, Dropout, Linear, get_activation_fn
-from module import BaseLayer, Module, NestedTensor, Tensor, ParameterSpec, PartitionSpec
+from module import BaseLayer, Module, Tensor, ParameterSpec
 
 
 def make_causal_mask(seq_len: int) -> Tensor:
@@ -141,7 +141,7 @@ class _BaseMultiheadLinear(BaseLayer):
         cfg.define("per_head_dim", 0, "Dimension per head.")
         cfg.define("bias", True, "Whether the linear modules have biases.")
         # Shard the 'num_heads' axis by the 'model' dim of the mesh.
-        cfg.param_partition_spec = PartitionSpec(None, "model", None)
+        cfg.param_partition_spec = (None, "model", None)
         assert linear_type in ("input", "output")
         cfg.param_init = MultiheadLinearInit.default_config().set(type=linear_type)
         return cfg
@@ -157,7 +157,7 @@ class _BaseMultiheadLinear(BaseLayer):
         if cfg.bias:
             params["bias"] = ParameterSpec(
                 shape=self._bias_shape,
-                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]),
+                partition_spec=[cfg.param_partition_spec[-1]],
             )
         return params
 
@@ -442,14 +442,14 @@ class TransformerFeedForwardLayer(BaseLayer):
         cfg.define(
             "linear1",
             Linear.default_config().set(
-                param_partition_spec=PartitionSpec(None, "model")
+                param_partition_spec=[None, "model"]
             ),
             "Config for the first linear layer.",
         )
         cfg.define(
             "linear2",
             Linear.default_config().set(
-                param_partition_spec=PartitionSpec("model", None)
+                param_partition_spec=["model", None]
             ),
             "Config for the second linear layer.",
         )
