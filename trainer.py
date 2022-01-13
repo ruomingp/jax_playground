@@ -14,7 +14,7 @@ import learner
 import metrics
 import module
 import summary_writer
-from module import functional as F, Module, NestedTensor
+from module import functional as F, Module, NestedTensor, OutputCollection
 from utils import tree_paths, flatten_items
 
 
@@ -208,7 +208,7 @@ class SpmdTrainer(_SpmdRunner):
         def _forward(model_parameters, input_batch):
             (loss, aux), model_output_collection = F(
                 self.model, state=model_parameters, is_training=True, prng_key=forward_key, inputs=input_batch,
-                output_collection_sections=("summaries", "state_updates"))
+                output_collection_sections=(OutputCollection.SECTION_SUMMARY, OutputCollection.SECTION_STATE_UPDATE))
             return loss, dict(aux=aux, **model_output_collection)
 
         _forward_and_grad = jax.value_and_grad(_forward, has_aux=True)
@@ -220,16 +220,17 @@ class SpmdTrainer(_SpmdRunner):
             self.learner, method="update",
             state=None, is_training=True, prng_key=learner_key,
             inputs=dict(state=state.learner, model_params=state.model, gradients=grads),
-            output_collection_sections=["summaries"])
+            output_collection_sections=[OutputCollection.SECTION_SUMMARY])
         updated_state = _TrainerState(
             model=_apply_updates(
-                updated_model_params, forward_output_collection["state_updates"]
+                updated_model_params, forward_output_collection[OutputCollection.SECTION_STATE_UPDATE]
             ),
             learner=updated_learner_state,
         )
         # TODO(ruoming): only retrieve summaries when necessary.
         summaries = dict(
-            model=forward_output_collection["summaries"], learner=learner_output_collection["summaries"],
+            model=forward_output_collection[OutputCollection.SECTION_SUMMARY],
+            learner=learner_output_collection[OutputCollection.SECTION_SUMMARY],
         )
         return dict(
             state=updated_state,
@@ -263,7 +264,7 @@ class SpmdEvaler(_SpmdRunner):
         if step % cfg.run_every_n_steps != 0:
             return
         _jit_eval_batch = self._jit(
-            partial(F, model, is_training=False, output_collection_sections=["summaries"]),
+            partial(F, model, is_training=False, output_collection_sections=[OutputCollection.SECTION_SUMMARY]),
             in_axis_resources=(
                 None,  # prng_key
                 self._parameter_sharding(),
@@ -278,7 +279,7 @@ class SpmdEvaler(_SpmdRunner):
             prng_key, batch_key = jax.random.split(prng_key)
             (_, aux), output_collection = _jit_eval_batch(batch_key, model_params, input_batch)
             if num_batches == 0:
-                self.summary_writer(step, output_collection["summaries"])
+                self.summary_writer(step, output_collection[OutputCollection.SECTION_SUMMARY])
             num_batches += 1
             metric_accumulator.update(input_batch, aux)
         summaries = metric_accumulator.summaries()

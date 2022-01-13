@@ -55,8 +55,8 @@ class FrozenDict(abc.Mapping):
 class OutputCollection:
     # Some standard section names.
     SECTION_DEFAULT = ""
-    SECTION_SUMMARY = "summary"
-    SECTION_STATE_UPDATE = "state_update"
+    SECTION_SUMMARY = "summaries"
+    SECTION_STATE_UPDATE = "state_updates"
 
     def __init__(self):
         self._all_names: Set[str] = set()
@@ -239,11 +239,6 @@ class Module(config_lib.Configurable):
         self._children[name] = module
         return module
 
-    def make_invocation_context(self, **kwargs):
-        return InvocationContext(
-            module=self, output_collection=OutputCollection(), **kwargs
-        )
-
     def get_invocation_context(self):
         context = current_context()
         if not context:
@@ -297,12 +292,20 @@ class Module(config_lib.Configurable):
         raise ValueError("context.module does not match self")
 
 
-def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTensor, inputs: Dict[str, Any], *,
+def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTensor,
+               inputs: Union[Sequence[Any], Dict[str, Any]], *,
                method: str = "forward", is_training: bool, output_collection_sections=tuple()) -> Tuple[
     Any, Dict[str, NestedTensor]]:
-    context = module.make_invocation_context(is_training=is_training, prng_key=prng_key, state=state)
+    context = InvocationContext(
+        module=module, state=state, output_collection=OutputCollection(), is_training=is_training, prng_key=prng_key,
+    )
+
     with root_context(context):
-        method_outputs = getattr(module, method)(**inputs)
+        if isinstance(inputs, dict):
+            input_args, input_kwargs = [], inputs
+        else:
+            input_args, input_kwargs = inputs, {}
+        method_outputs = getattr(module, method)(*input_args, **input_kwargs)
     output_collections = {section: context.output_collection.get_values_recursively(section) for section in
                           output_collection_sections}
     return method_outputs, output_collections
