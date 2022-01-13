@@ -24,7 +24,7 @@ class DummyInput(Module):
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
-        cfg.define("batch_size", 4, "The batch size.")
+        cfg.define("batch_size", 8, "The batch size.")
         cfg.define(
             "total_num_batches",
             None,

@@ -62,10 +62,10 @@ class LayerNorm(BaseLayer):
         cfg = self.config
         return {
             "scale": ParameterSpec(
-                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+                shape=[cfg.dim], partition_spec=tuple("model")
             ),
             "bias": ParameterSpec(
-                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+                shape=[cfg.dim], partition_spec=tuple("model")
             ),
         }
 
@@ -95,7 +95,7 @@ class RMSNorm(BaseLayer):
         cfg = self.config
         return {
             "scale": ParameterSpec(
-                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+                shape=[cfg.dim], partition_spec=tuple("model")
             ),
         }
 
@@ -125,21 +125,21 @@ class BatchNorm(BaseLayer):
         cfg = self.config
         return {
             "scale": ParameterSpec(
-                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+                shape=[cfg.dim], partition_spec=tuple("model")
             ),
             "bias": ParameterSpec(
-                shape=[cfg.dim], partition_spec=PartitionSpec("model")
+                shape=[cfg.dim], partition_spec=tuple("model")
             ),
             "moving_mean": ParameterSpec(
                 shape=[cfg.dim],
                 dtype=jnp.float32,
-                partition_spec=PartitionSpec("model"),
+                partition_spec=tuple("model"),
                 initializer=param_init.ConstantInitializer(0.0),
             ),
             "moving_variance": ParameterSpec(
                 shape=[cfg.dim],
                 dtype=jnp.float32,
-                partition_spec=PartitionSpec("model"),
+                partition_spec=tuple("model"),
                 initializer=param_init.ConstantInitializer(1.0),
             ),
         }
@@ -179,8 +179,7 @@ class Linear(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
-        # cfg.param_partition_spec = PartitionSpec(None, None)
-        cfg.param_partition_spec = (None, None)
+        cfg.param_partition_spec = tuple(None, None)
         return cfg
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
@@ -192,7 +191,7 @@ class Linear(BaseLayer):
         if cfg.bias:
             params["bias"] = ParameterSpec(
                 shape=[cfg.output_dim],
-                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
+                partition_spec=tuple(cfg.param_partition_spec[-1]))
         return params
 
     def forward(self, x: Tensor) -> Tensor:
@@ -217,8 +216,7 @@ class Conv2D(BaseLayer):
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
-        # cfg.param_partition_spec = PartitionSpec(None, None, None, None)
-        cfg.param_partition_spec = (None, None, None, None)
+        cfg.param_partition_spec = tuple(None, None, None, None)
         return cfg
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
@@ -237,7 +235,7 @@ class Conv2D(BaseLayer):
         if cfg.bias:
             params["bias"] = ParameterSpec(
                 shape=[cfg.output_dim],
-                partition_spec=PartitionSpec(cfg.param_partition_spec[-1]))
+                partition_spec=tuple(cfg.param_partition_spec[-1]))
         return params
 
     def forward(self, x: Tensor) -> Tensor:
