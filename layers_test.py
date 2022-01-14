@@ -10,10 +10,10 @@ from jax import numpy as jnp
 
 from typing import Tuple, Union
 
-import layers
 import module
 from module import functional as F, BaseLayer
 from layers import Conv2D, Linear, LayerNorm, RMSNorm, BatchNorm
+import utils
 
 
 def _assert_allclose(a, b, atol=1e-6, rtol=1e-3):
@@ -289,5 +289,5 @@ class LayerTest(parameterized.TestCase):
 
 
 if __name__ == "__main__":
-    layers.enable_numeric_checks = True
+    utils.enable_numeric_checks = True
     absltest.main()

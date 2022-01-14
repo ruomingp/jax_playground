@@ -6,6 +6,17 @@ from typing import Dict, Mapping, Sequence, TypeVar, Union
 Tensor = jnp.ndarray
 NestedTensor = Dict[str, Union[Tensor, "NestedTensor"]]
 
+enable_numeric_checks = False
+
+
+def check_numerics(x: Tensor, msg_fmt: str = "", **msg_kwargs):
+    global enable_numeric_checks
+    if enable_numeric_checks:
+        assert bool(
+            jnp.isfinite(x).all()
+        ), f"Check numerics {msg_fmt.format(**msg_kwargs)}: {x}"
+    return x
+
 
 def tree_paths(tree, separator="/"):
     def _concat(prefix, suffix):

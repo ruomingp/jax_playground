@@ -1,6 +1,6 @@
 import dataclasses
 from absl import logging
-from typing import Any, Dict
+from typing import Any, Dict, NamedTuple
 
 import jax
 from jax import numpy as jnp
@@ -8,18 +8,9 @@ from jax import numpy as jnp
 import config
 
 
-@dataclasses.dataclass
-@jax.tree_util.register_pytree_node_class
-class WeightedScalar:
+class WeightedScalar(NamedTuple):
     mean: jnp.ndarray
     weight: jnp.ndarray
-
-    def tree_flatten(self):
-        return ((self.mean, self.weight), None)
-
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        return cls(*children)
 
     def __add__(self, other: "WeightedScalar"):
         weight = self.weight + other.weight
@@ -39,7 +30,7 @@ class MetricAccumulator(config.Configurable):
         is_leaf = lambda x: isinstance(x, WeightedScalar)
         return jax.tree_map(*args, **kwargs, is_leaf=is_leaf)
 
-    def update(self, input_batch: Any, model_outputs: Dict[str, Any]):
+    def update(self, model_outputs: Dict[str, Any]):
         logging.debug(
             "MetricAccumulator.update: current=%s update=%s",
             self._scalars,

@@ -6,10 +6,7 @@ from jax import numpy as jnp
 
 from module import BaseLayer, NestedTensor, ParameterSpec, PartitionSpec
 import param_init
-
-Tensor = jnp.ndarray
-
-enable_numeric_checks = False
+from utils import Tensor, check_numerics
 
 
 def get_activation_fn(name) -> Callable[[Tensor], Tensor]:
@@ -17,15 +14,6 @@ def get_activation_fn(name) -> Callable[[Tensor], Tensor]:
         return getattr(nn, name[3:])
     else:
         raise NotImplementedError(f"Unsupported activation function {name}")
-
-
-def check_numerics(x: Tensor, msg_fmt: str = "", **msg_kwargs):
-    global enable_numeric_checks
-    if enable_numeric_checks:
-        assert bool(
-            jnp.isfinite(x).all()
-        ), f"Check numerics {msg_fmt.format(**msg_kwargs)}: {x}"
-    return x
 
 
 class Dropout(BaseLayer):

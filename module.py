@@ -282,7 +282,8 @@ class Module(config_lib.Configurable):
         context = current_context()
         if context is None:
             raise ValueError(
-                f"context is required when {self} is invoked outside of an InvocationContext."
+                f"context is required when {self} is invoked outside of an InvocationContext. "
+                "Consider using module.functional() to wrap the call."
             )
         if context.module is self:
             return f()

@@ -7,8 +7,9 @@ from jax import numpy as jnp
 
 import config as config_lib
 import param_init
-from layers import check_numerics, LayerNorm, Dropout, Linear, get_activation_fn
-from module import BaseLayer, Module, Tensor, ParameterSpec
+from layers import LayerNorm, Dropout, Linear, get_activation_fn
+from module import BaseLayer, Module, ParameterSpec
+from utils import Tensor, check_numerics
 
 
 def make_causal_mask(seq_len: int) -> Tensor:
@@ -161,7 +162,7 @@ class _BaseMultiheadLinear(BaseLayer):
             )
         return params
 
-    def forward(self, inputs: jnp.ndarray) -> jnp.ndarray:
+    def forward(self, inputs: Tensor) -> Tensor:
         params = self.parameters
         outputs = jnp.einsum(self._einsum_expr, inputs, params["weight"])
         return outputs + params.get("bias", 0)
