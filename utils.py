@@ -58,3 +58,13 @@ def is_named_tuple(x):
       x: The object to check.
     """
     return isinstance(x, tuple) and hasattr(x, "_fields") and hasattr(x, "_asdict")
+
+
+def as_tensor(x):
+    if isinstance(x, Tensor):
+        return x
+    if hasattr(x, "numpy"):
+        return jnp.asarray(x.numpy())
+    if isinstance(x, (Mapping, Sequence)):
+        return jax.tree_map(as_tensor, x)
+    raise NotImplementedError(f"{type(x)}: {x}")

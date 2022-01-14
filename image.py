@@ -1,3 +1,7 @@
+"""
+References:
+- https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
+"""
 from typing import Optional
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -5,6 +9,8 @@ from absl import logging
 
 import config as config_lib
 from module import Module
+import utils
+
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
@@ -28,6 +34,7 @@ class ImagenetInput(Module):
         )
         cfg.define("shuffle_seed", None, "The shuffle seed.")
         cfg.define("prefetch_buffer_size", 1024, "The prefetch buffer size.")
+        cfg.define("image_size", (224, 224), "The image size.")
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
@@ -65,8 +72,9 @@ class ImagenetInput(Module):
         image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
         if cfg.is_training:
             image = tf.image.random_flip_left_right(image)
-        example["image"] = image
-        return example
+        image = tf.image.resize([image], cfg.image_size, method=tf.image.ResizeMethod.BICUBIC)[0]
+        return {"image": image, "label": example["label"]}
 
     def __iter__(self):
-        return self._dataset.__iter__()
+        for example in self._dataset:
+            yield utils.as_tensor(example)

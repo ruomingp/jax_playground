@@ -1,6 +1,5 @@
 """
-References:
-- https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
+$ python3 imagenet.py --dir=$HOME/experiments/imagenet-$(date +%F) 2>&1 | tee /tmp/log
 """
 import os.path
 
@@ -59,6 +58,7 @@ def imagenet_trainer_config():
     )
     cfg.evalers = (evaler_train, evaler_validation)
     for evaler_cfg in cfg.evalers:
+        evaler_cfg.run_every_n_steps = steps_per_epoch
         evaler_cfg.summary_writer.dir = os.path.join(cfg.summary_writer.dir, evaler_cfg.name)
 
     def learning_rate_schedule(step: int) -> float:

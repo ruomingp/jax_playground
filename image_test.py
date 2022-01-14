@@ -4,12 +4,24 @@ from image import ImagenetInput
 import utils
 
 
+def _count_batches(dataset, max_batches=100):
+    num_batches = 0
+    for batch in dataset:
+        num_batches += 1
+        if num_batches > max_batches:
+            return -1
+    return num_batches
+
+
 class ImagenetInputTest(absltest.TestCase):
     def testIteration(self):
-        cfg = ImagenetInput.default_config().set(name="imagenet", tfds_name="mnist", split="validation", batch_size=8, is_training=False)
+        cfg = ImagenetInput.default_config().set(name="test", tfds_name="imagenet2012", split="train[:40]", batch_size=8, is_training=False)
         dataset = cfg.instantiate(parent=None)
+        # 40 images / 8.
+        self.assertEqual(5, _count_batches(dataset))
         for batch in dataset:
-            logging.info("batch=%s", utils.shapes(batch))
+            self.assertEqual({'image': (8, 224, 224, 3), 'label': (8,)}, utils.shapes(batch))
+            break
 
 
 if __name__ == "__main__":

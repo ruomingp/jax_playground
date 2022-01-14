@@ -15,7 +15,7 @@ import metrics
 import module
 import summary_writer
 from module import functional as F, Module, NestedTensor, OutputCollection
-from utils import tree_paths, flatten_items
+from utils import as_tensor, tree_paths, flatten_items
 
 
 def _apply_updates(base, updates):
@@ -114,7 +114,7 @@ class SpmdTrainer(_SpmdRunner):
             self._add_child(evaler_cfg.name, evaler_cfg)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
-        logging.info("Model param specs: %s", self._model_param_specs)
+        logging.debug("Model param specs: %s", self._model_param_specs)
         model_param_partition_specs = jax.tree_map(
             lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
         )
@@ -284,6 +284,13 @@ class SpmdEvaler(_SpmdRunner):
             if num_batches == 0:
                 self.summary_writer(step, output_collection[OutputCollection.SECTION_SUMMARY])
             num_batches += 1
+            logging.info(
+                "Process % 3d step % 8d batch % 8d: %s.metrics=%s",
+                jax.process_index(),
+                step,
+                num_batches,
+                self.path(),
+                aux)
             metric_accumulator.update(aux)
         summaries = metric_accumulator.summaries()
         logging.info(
