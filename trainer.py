@@ -281,7 +281,7 @@ class SpmdEvaler(_SpmdRunner):
             if num_batches == 0:
                 self.summary_writer(step, output_collection[OutputCollection.SECTION_SUMMARY])
             num_batches += 1
-            metric_accumulator.update(input_batch, aux)
+            metric_accumulator.update(aux)
         summaries = metric_accumulator.summaries()
         logging.info(
             "Process % 3d step % 8d: %s.metrics=%s",

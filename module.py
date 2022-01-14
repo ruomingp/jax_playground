@@ -7,6 +7,9 @@ Design choices:
 * A module's config is frozen upon __init__. This prevents the config from being modified by accident.
 * Module.config returns a copy of the module's config. This allows the caller to make changes without affecting the
   original config.
+
+TBD:
+* Should add_summary() take WeightedScalar?
 """
 import contextlib
 import copy
@@ -295,8 +298,29 @@ class Module(config_lib.Configurable):
 
 def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTensor,
                inputs: Union[Sequence[Any], Dict[str, Any]], *,
-               method: str = "forward", is_training: bool, output_collection_sections=tuple()) -> Tuple[
-    Any, Dict[str, NestedTensor]]:
+               method: str = "forward", is_training: bool,
+               output_collection_sections: Sequence[str] = tuple()) -> Tuple[Any, Dict[str, NestedTensor]]:
+    """Invokes <module>.<method> in a pure functional fashion.
+
+    The invocation will not depend on external inputs or have any side effects. The results only depend on the given
+    inputs. All outputs are reflected in the return value.
+
+    Args:
+        module: The Module to invoke.
+        prng_key: the pseudo-random number generate key.
+        state: The input state of the module, including model parameters if the module contains a model.
+        inputs: The inputs for the method. If it's a sequence, it represents the positional args. If it's a dict,
+          it represents keyword args.
+        method: The Module method to invoke.
+        is_training: Whether the invocation should run in the training mode.
+        output_collection_sections: A sequence of output collection section names.
+
+    Returns:
+        (method_outputs, output_collection), where
+        - method_outputs are the return value of the method.
+        - output_collection is a dict whose keys are output_collection_sections and values are NestedTensors for
+          the corresponding output section. This can be used to collect summaries and module state updates.
+    """
     context = InvocationContext(
         module=module, state=state, output_collection=OutputCollection(), is_training=is_training, prng_key=prng_key,
     )
@@ -315,7 +339,12 @@ def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTenso
 @dataclasses.dataclass
 class ParameterSpec:
     shape: Sequence[int]
-    partition_spec: PartitionSpec
+    # If None, the parameter will not be partitioned and will be replicated.
+    # If a sequence, it should have at most len(shape) elements. partition_spec[i] describes partitioning for shape[i],
+    # where each value can be:
+    # - None: do not partition along this axis, or
+    # - 'model': partition along this axis across the 'model' dim of the device mesh.
+    partition_spec: Optional[Sequence[Optional[str]]]
     # The data type of the param. If None, uses the layer's default dtype.
     dtype: Optional[jnp.dtype] = None
     # The initializer of the param. If None, uses the layer's default initializer.
