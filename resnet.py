@@ -280,7 +280,7 @@ class ResNetModel(BaseLayer):
         # [batch, num_classes].
         label_onehot = jax.nn.one_hot(label, cfg.num_classes, dtype=logits.dtype)
         # [batch].
-        per_example_loss = jnp.sum(label_onehot * jax.nn.log_softmax(logits), axis=-1)
+        per_example_loss = jnp.sum(-label_onehot * jax.nn.log_softmax(logits), axis=-1)
         # Scalar.
         loss = jnp.mean(per_example_loss)
         # [batch].
