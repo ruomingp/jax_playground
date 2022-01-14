@@ -3,20 +3,17 @@ References:
 - https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
 """
 import os.path
-from typing import Optional
 
 import jax.random
+import optax
+from absl import app, flags, logging
 from jax.experimental import maps
 from jax.experimental import mesh_utils
-import optax
-import tensorflow as tf
-import tensorflow_datasets as tfds
-from absl import app, flags, logging
 
 import config as config_lib
 import learner
 import resnet
-from module import Module
+from image import ImagenetInput
 from trainer import SpmdTrainer, SpmdEvaler
 
 flags.DEFINE_string(
@@ -29,65 +26,6 @@ flags.DEFINE_string(
 flags.DEFINE_list("mesh_shape", [8, 1], "The global device mesh shape for (data, model).")
 
 FLAGS = flags.FLAGS
-
-MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
-STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
-
-
-class ImagenetInput(Module):
-    @classmethod
-    def default_config(cls):
-        cfg = super().default_config()
-        cfg.define("is_training", False, "Whether the examples are used for training.")
-        cfg.define("split", "train", "The dataset split.")
-        cfg.define("batch_size", None, "The batch size.")
-        cfg.define(
-            "shuffle_buffer_size",
-            4096,
-            "The shuffle buffer size (only used when is_training=True).",
-        )
-        cfg.define("shuffle_seed", None, "The shuffle seed.")
-        cfg.define("prefetch_buffer_size", 1024, "The prefetch buffer size.")
-        return cfg
-
-    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
-        super().__init__(cfg, parent=parent)
-        cfg = self.config
-        ds: tf.data.Dataset = tfds.load(
-            name="imagenet2012",
-            split=cfg.split,
-            shuffle_files=cfg.is_training,
-            download=False,
-        )
-        ds = ds.map(
-            self._process_example, num_parallel_calls=tf.data.experimental.AUTOTUNE
-        )
-        if cfg.is_training:
-            ds = ds.repeat()
-            ds = ds.shuffle(
-                cfg.shuffle_buffer_size,
-                seed=cfg.shuffle_seed,
-                reshuffle_each_iteration=True,
-            )
-        ds = ds.prefetch(cfg.prefetch_buffer_size)
-        ds = ds.batch(cfg.batch_size, drop_remainder=True)
-        self._dataset = ds
-
-    def _process_example(self, example):
-        cfg = self.config
-        logging.info("example=%s", example.keys())
-        image = example["image"]
-        logging.info("image=%s", type(image))
-        image = tf.cast(tf.convert_to_tensor(image), tf.float32)
-        image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
-        image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
-        if cfg.is_training:
-            image = tf.image.random_flip_left_right(image)
-        example["image"] = image
-        return example
-
-    def __iter__(self):
-        return self._dataset.__iter__()
 
 
 def imagenet_trainer_config():

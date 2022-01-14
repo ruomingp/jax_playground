@@ -18,6 +18,10 @@ def check_numerics(x: Tensor, msg_fmt: str = "", **msg_kwargs):
     return x
 
 
+def shapes(nested_tensor: NestedTensor) -> NestedTensor:
+    return jax.tree_map(lambda x: x.shape, nested_tensor)
+
+
 def tree_paths(tree, separator="/"):
     def _concat(prefix, suffix):
         return f"{prefix}{separator}{suffix}" if prefix else f"{suffix}"
