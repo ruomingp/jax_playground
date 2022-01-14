@@ -2,25 +2,29 @@
 References:
 - https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
 """
+import os.path
+from typing import Optional
+
 import jax.random
-import numpy as np
 import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 from absl import app, flags, logging
-from typing import Optional
 
 import config as config_lib
 import learner
-from module import Module
 import resnet
+from module import Module
 from trainer import SpmdTrainer, SpmdEvaler
 
-
 flags.DEFINE_string(
-    "dir",
-)
+    "dir", None,
+    "The root directory of the trainer. "
+    "Checkpoints will be stored in <dir>/checkpoints. "
+    "Summaries will be stored in <dir>/summaries.",
+    required=True)
 
+FLAGS = flags.FLAGS
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
@@ -49,7 +53,7 @@ class ImagenetInput(Module):
             name="imagenet2012",
             split=cfg.split,
             shuffle_files=cfg.is_training,
-            try_gcs=True,
+            download=False,
         )
         ds = ds.map(
             self._process_image, num_parallel_calls=tf.data.experimental.AUTOTUNE
@@ -90,6 +94,9 @@ def imagenet_trainer_config():
         split="train", is_training=True, batch_size=train_batch_size
     )
     cfg.model = resnet.ResNetModel.resnet18_config()
+    cfg.summary_writer.dir = os.path.join(FLAGS.dir, "summaries")
+    cfg.summary_writer.write_every_n_steps = 10
+    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
     cfg.checkpointer.write_every_n_steps = steps_per_epoch
     cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
     evaler_train = SpmdEvaler.default_config().set(
