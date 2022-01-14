@@ -29,7 +29,7 @@ class Learner(Module):
     ):
         cfg = self.config
         if cfg.optimizer.cls == optax.sgd:
-            return LearnerState(optimizer=(optax.TraceState(trace=model_param_partition_specs), optax.EmptyState()))
+            return LearnerState(optimizer=(optax.TraceState(trace=model_param_partition_specs), None))
         raise NotImplementedError(cfg.optimizer)
 
     def init(self, model_params: NestedTensor) -> LearnerState:

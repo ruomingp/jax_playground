@@ -6,6 +6,8 @@ import os.path
 from typing import Optional
 
 import jax.random
+from jax.experimental import maps
+from jax.experimental import mesh_utils
 import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -23,6 +25,8 @@ flags.DEFINE_string(
     "Checkpoints will be stored in <dir>/checkpoints. "
     "Summaries will be stored in <dir>/summaries.",
     required=True)
+
+flags.DEFINE_list("mesh_shape", [8, 1], "The global device mesh shape for (data, model).")
 
 FLAGS = flags.FLAGS
 
@@ -56,7 +60,7 @@ class ImagenetInput(Module):
             download=False,
         )
         ds = ds.map(
-            self._process_image, num_parallel_calls=tf.data.experimental.AUTOTUNE
+            self._process_example, num_parallel_calls=tf.data.experimental.AUTOTUNE
         )
         if cfg.is_training:
             ds = ds.repeat()
@@ -69,17 +73,21 @@ class ImagenetInput(Module):
         ds = ds.batch(cfg.batch_size, drop_remainder=True)
         self._dataset = ds
 
-    def _process_image(self, image):
+    def _process_example(self, example):
         cfg = self.config
-        image = tf.cast(image, tf.float32)
+        logging.info("example=%s", example.keys())
+        image = example["image"]
+        logging.info("image=%s", type(image))
+        image = tf.cast(tf.convert_to_tensor(image), tf.float32)
         image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
         image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
         if cfg.is_training:
             image = tf.image.random_flip_left_right(image)
-        return image
+        example["image"] = image
+        return example
 
     def __iter__(self):
-        return iter(self._dataset)
+        return self._dataset.__iter__()
 
 
 def imagenet_trainer_config():
@@ -112,6 +120,8 @@ def imagenet_trainer_config():
         ),
     )
     cfg.evalers = (evaler_train, evaler_validation)
+    for evaler_cfg in cfg.evalers:
+        evaler_cfg.summary_writer.dir = os.path.join(cfg.summary_writer.dir, evaler_cfg.name)
 
     def learning_rate_schedule(step: int) -> float:
         stage = step // (steps_per_epoch * 30)
@@ -126,12 +136,19 @@ def imagenet_trainer_config():
     return cfg
 
 
+def run_trainer(trainer_config, mesh_shape):
+    trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
+    prng_key = jax.random.PRNGKey(1)
+    devices = mesh_utils.create_device_mesh(mesh_shape)
+    mesh = maps.Mesh(devices, ("data", "model"))
+    with maps.mesh(mesh.devices, mesh.axis_names):
+        trainer.run(prng_key, max_step=100)
+
+
 def main(argv):
     trainer_config = imagenet_trainer_config()
     logging.info("Trainer config: %s", trainer_config.debug_string())
-    trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
-    prng_key = jax.random.PRNGKey(1)
-    trainer.run(prng_key, max_step=100)
+    run_trainer(trainer_config, FLAGS.mesh_shape)
 
 
 if __name__ == "__main__":

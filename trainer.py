@@ -142,9 +142,13 @@ class SpmdTrainer(_SpmdRunner):
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
-        for step in range(1, max_step + 1):
+        step = 1
+        for input_batch in self.input:
             prng_key, step_key = jax.random.split(prng_key)
-            self._run_step(step, step_key)
+            self._run_step(step, step_key, input_batch)
+            step += 1
+            if step > max_step:
+                break
 
     def _init(self, prng_key: jax.random.KeyArray):
         def _init_state(prng_key: jax.random.KeyArray):
@@ -175,9 +179,8 @@ class SpmdTrainer(_SpmdRunner):
             logging.info("Failed to restore checkpoint: %s", e)
             self.checkpointer.save(step=0, state=self._state)
 
-    def _run_step(self, step: int, prng_key: jax.random.KeyArray):
+    def _run_step(self, step: int, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
-        input_batch = next(self.input)
         prng_key, train_key = jax.random.split(prng_key)
         # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
         outputs = self._jit_train_step(train_key, self._state, input_batch)
