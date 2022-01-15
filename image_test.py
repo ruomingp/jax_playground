@@ -32,7 +32,8 @@ class ImagenetInputTest(absltest.TestCase):
             name="test", tfds_name="imagenet2012", split="train[:31]", global_batch_size=8, is_training=False,
             data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
         )
-        dataset = cfg.instantiate(parent=None)
+        with self.assertRaisesRegex(ValueError, "must be divisible by global_batch_size"):
+            cfg.instantiate(parent=None)
 
 
 if __name__ == "__main__":
