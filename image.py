@@ -45,10 +45,9 @@ class ImagenetInput(Module):
         if cfg.is_training is None:
             raise ValueError(f"{self.path()}: is_training must be specified explicitly")
         # Tune according to https://www.tensorflow.org/datasets/performances.
-        if cfg.is_training:
-            split = tfds.even_splits(cfg.split, n=jax.process_count(), drop_remainder=True)[jax.process_index()]
-        else:
-            split = cfg.split
+        split = cfg.split
+        if jax.process_count() > 1:
+            split = tfds.even_splits(split, n=jax.process_count(), drop_remainder=True)[jax.process_index()]
         ds: tf.data.Dataset = tfds.load(
             name=cfg.tfds_name,
             split=split,
