@@ -31,7 +31,7 @@ class Dropout(BaseLayer):
             return x
         assert 0 < cfg.rate < 1
         dropout = jax.random.bernoulli(
-            BaseLayer.current_context().prng_key, p=cfg.rate, shape=x.shape
+            self.get_invocation_context().prng_key, p=cfg.rate, shape=x.shape
         )
         return jnp.where(dropout, jnp.zeros_like(x), x / (1.0 - cfg.rate))
 

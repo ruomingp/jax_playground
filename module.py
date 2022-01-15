@@ -255,6 +255,10 @@ class Module(config_lib.Configurable):
         return self.get_invocation_context().is_training
 
     @property
+    def prng_key(self) -> jax.random.KeyArray:
+        return self.get_invocation_context().prng_key
+
+    @property
     def state(self):
         return self.get_invocation_context().state
 
