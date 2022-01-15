@@ -29,12 +29,8 @@ flags.DEFINE_string(
     "Checkpoints will be stored in <dir>/checkpoints. "
     "Summaries will be stored in <dir>/summaries.",
     required=True)
-
-
 flags.DEFINE_string("data_dir", None, "The tfds directory. If None, uses ~/tensorflow_datasets.")
-
 flags.DEFINE_list("mesh_shape", [8, 1], "The global device mesh shape for (data, model).")
-
 flags.DEFINE_integer("jax_profiler_port", 9999, "The profiler port.")
 
 
@@ -50,7 +46,7 @@ def imagenet_trainer_config():
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
     cfg.input = ImagenetInput.default_config().set(
-        split="train", is_training=True, batch_size=train_batch_size,
+        split="train", is_training=True, global_batch_size=train_batch_size,
         data_dir=FLAGS.data_dir,
     )
     cfg.model = resnet.ResNetModel.resnet18_config()
@@ -72,7 +68,7 @@ def imagenet_trainer_config():
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     for evaler_cfg in cfg.evalers:
         evaler_cfg.run_every_n_steps = steps_per_epoch
-        evaler_cfg.input.set(is_training=False, batch_size=eval_batch_size, data_dir=FLAGS.data_dir)
+        evaler_cfg.input.set(is_training=False, global_batch_size=eval_batch_size, data_dir=FLAGS.data_dir)
         evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
 
     def learning_rate_schedule(step: int) -> float:

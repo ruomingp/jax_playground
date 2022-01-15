@@ -24,7 +24,7 @@ class ImagenetInput(Module):
         cfg = super().default_config()
         cfg.define("tfds_name", "imagenet2012", "The tensorflow dataset name.")
         cfg.define("split", "validation", "The dataset split.")
-        cfg.define("batch_size", None, "The batch size.")
+        cfg.define("global_batch_size", None, "The global batch size.")
         cfg.define("is_training", None, "Whether the examples are used for training.")
         cfg.define("data_dir", None, "Used for tfds.load. If None, use $HOME/tensorflow_datasets.")
         cfg.define("download", False,
@@ -44,17 +44,27 @@ class ImagenetInput(Module):
         cfg = self.config
         if cfg.is_training is None:
             raise ValueError(f"{self.path()}: is_training must be specified explicitly")
-        # Tune according to https://www.tensorflow.org/datasets/performances.
-        if cfg.is_training:
-            split = tfds.even_splits(cfg.split, n=jax.process_count(), drop_remainder=True)[jax.process_index()]
-        else:
-            split = cfg.split
-        ds: tf.data.Dataset = tfds.load(
-            name=cfg.tfds_name,
+        # TODO(ruoming): tune according to https://www.tensorflow.org/datasets/performances.
+        builder = tfds.builder(cfg.tfds_name, data_dir=cfg.data_dir)
+        if cfg.download:
+            logging.info("Downloading %s", cfg.tfds_name)
+            builder.download_and_prepare()
+            logging.info("Downloading %s done", cfg.tfds_name)
+        if not cfg.is_training:
+            split_ds = builder.as_dataset(split=cfg.split, batch_size=1)
+            num_examples = len(split_ds)
+            if num_examples % cfg.global_batch_size != 0:
+                raise ValueError(f"Evaluation dataset size ({num_examples}) must be divisible by "
+                                 f"global_batch_size ({cfg.global_batch_size}")
+        split = cfg.split
+        if cfg.global_batch_size % jax.process_count() != 0:
+            raise ValueError(f"global_batch_size ({cfg.global_batch_size} must be divisible by "
+                             f"process_count ({jax.process_count()})")
+        batch_size = cfg.global_batch_size // jax.process_count()
+        split = tfds.even_splits(split, n=jax.process_count(), drop_remainder=cfg.is_training)[jax.process_index()]
+        ds: tf.data.Dataset = builder.as_dataset(
             split=split,
             shuffle_files=cfg.is_training,
-            data_dir=cfg.data_dir,
-            download=cfg.download,
         )
         ds = ds.map(self._process_example, num_parallel_calls=tf.data.AUTOTUNE)
         if cfg.is_training:
@@ -64,8 +74,8 @@ class ImagenetInput(Module):
                 seed=cfg.shuffle_seed,
                 reshuffle_each_iteration=True,
             )
+        ds = ds.batch(batch_size, drop_remainder=True)
         ds = ds.prefetch(cfg.prefetch_buffer_size)
-        ds = ds.batch(cfg.batch_size, drop_remainder=True)
         self._dataset = ds
 
     def _process_example(self, example):
