@@ -1,4 +1,5 @@
 from typing import Any, Callable, Dict, NamedTuple, Optional
+import time
 
 import jax
 from absl import logging
@@ -15,7 +16,7 @@ import metrics
 import module
 import summary_writer
 from module import functional as F, Module, NestedTensor, OutputCollection
-from utils import as_tensor, tree_paths, flatten_items
+from utils import Tensor, as_tensor, tree_paths, flatten_items
 
 
 def _apply_updates(base, updates):
@@ -72,7 +73,7 @@ class _SpmdRunner(Module):
         return None
 
     def _state_sharding(self):
-        return _TrainerState(
+        return _TrainerState(step=None,
             model=self._parameter_sharding(), learner=self._parameter_sharding()
         )
 
@@ -82,6 +83,7 @@ class _SpmdRunner(Module):
 
 
 class _TrainerState(NamedTuple):
+    step: Tensor
     model: NestedTensor
     learner: learner.LearnerState
 
@@ -125,6 +127,7 @@ class SpmdTrainer(_SpmdRunner):
             model_param_partition_specs
         )
         self._trainer_state_partition_specs = _TrainerState(
+            step=None,
             model=model_param_partition_specs,
             learner=learner_state_partition_specs,
         )
@@ -138,16 +141,26 @@ class SpmdTrainer(_SpmdRunner):
             out_axis_resources=None,
         )
 
+    @property
+    def step(self):
+        return self._state.step.item()
+
     def run(self, prng_key: jax.random.KeyArray, max_step: int):
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
-        step = 1
+        start_time = time.perf_counter()
+        num_steps = 0
         for input_batch in self.input:
             prng_key, step_key = jax.random.split(prng_key)
-            self._run_step(step, step_key, input_batch)
-            step += 1
-            if step > max_step:
+            self._run_step(step_key, input_batch)
+            num_steps += 1
+            if num_steps % 100 == 0:
+                now = time.perf_counter()
+                logging.info("Average step time: %s seconds", (now - start_time) / num_steps)
+                num_steps = 0
+                start_time = now
+            if self.step >= max_step:
                 break
 
     def _init(self, prng_key: jax.random.KeyArray):
@@ -156,7 +169,7 @@ class SpmdTrainer(_SpmdRunner):
                 prng_key, self._model_param_specs
             )
             learner_params = self.learner.init(model_params)
-            return _TrainerState(model=model_params, learner=learner_params)
+            return _TrainerState(step=jnp.zeros([], dtype=jnp.int64), model=model_params, learner=learner_params)
 
         init_computation = self._jit(
             _init_state,
@@ -176,10 +189,13 @@ class SpmdTrainer(_SpmdRunner):
         try:
             self._state = self.checkpointer.restore(step=None, state=self._state)
         except Exception as e:
-            logging.info("Failed to restore checkpoint: %s", e)
-            self.checkpointer.save(step=0, state=self._state)
+            logging.info(f"Failed to restore checkpoint. This is expected when we start training a model: {e}")
+        finally:
+            # Save the initial ckpt for debugging.
+            # self.checkpointer.save(step=self.step, state=self._state)
+            pass
 
-    def _run_step(self, step: int, prng_key: jax.random.KeyArray, input_batch: Any):
+    def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
         prng_key, train_key = jax.random.split(prng_key)
         # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
@@ -188,17 +204,17 @@ class SpmdTrainer(_SpmdRunner):
         logging.info(
             "Process % 3d step % 8d: loss=%s aux=%s",
             jax.process_index(),
-            step,
+            self.step,
             outputs["loss"],
-            outputs["aux"],
+            jax.tree_map(lambda x: x.item(), outputs["aux"]),
         )
-        self.summary_writer(step, {"loss": outputs["loss"], **outputs["summaries"]})
+        self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
-                step, eval_key, model=self.model, model_params=self._state.model
+                self.step, eval_key, model=self.model, model_params=self._state.model
             )
-        self.checkpointer.save(step=step, state=self._state)
+        self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
             self,
@@ -225,6 +241,7 @@ class SpmdTrainer(_SpmdRunner):
             inputs=dict(state=state.learner, model_params=state.model, gradients=grads),
             output_collection_sections=[OutputCollection.SECTION_SUMMARY])
         updated_state = _TrainerState(
+            step=state.step + 1,
             model=_apply_updates(
                 updated_model_params, forward_output_collection[OutputCollection.SECTION_STATE_UPDATE]
             ),
@@ -290,7 +307,7 @@ class SpmdEvaler(_SpmdRunner):
                 step,
                 num_batches,
                 self.path(),
-                aux)
+                jax.tree_map(lambda x: x.item(), aux))
             metric_accumulator.update(aux)
         summaries = metric_accumulator.summaries()
         logging.info(

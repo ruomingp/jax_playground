@@ -40,7 +40,7 @@ def imagenet_trainer_config():
     )
     cfg.model = resnet.ResNetModel.resnet18_config()
     cfg.summary_writer.dir = os.path.join(FLAGS.dir, "summaries")
-    cfg.summary_writer.write_every_n_steps = 10
+    cfg.summary_writer.write_every_n_steps = 100
     cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
     cfg.checkpointer.write_every_n_steps = steps_per_epoch
     cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
@@ -80,7 +80,7 @@ def run_trainer(trainer_config, mesh_shape):
     devices = mesh_utils.create_device_mesh(mesh_shape)
     mesh = maps.Mesh(devices, ("data", "model"))
     with maps.mesh(mesh.devices, mesh.axis_names):
-        trainer.run(prng_key, max_step=100)
+        trainer.run(prng_key, max_step=1000000)
 
 
 def main(argv):
