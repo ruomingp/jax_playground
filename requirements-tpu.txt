@@ -1,5 +1,4 @@
 absl-py
-jax
 optax  # optimizers
 tensorflow-datasets
 tbp-nightly  # https://jax.readthedocs.io/en/latest/profiling.html
