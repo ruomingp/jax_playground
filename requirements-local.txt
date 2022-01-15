@@ -1,0 +1,9 @@
+# Requirements for a local machine (not TPU VM).
+
+# Per https://jax.readthedocs.io/en/latest/profiling.html:
+# Cloud TPU VMs come with a special version of TensorFlow pre-installed, so there’s no need to explicitly install it,
+# and doing so can cause TensorFlow to stop working on TPU.
+tensorflow  # needed for tfds and summary
+
+torch  # test-only
+transformers  # test-only

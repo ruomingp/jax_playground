@@ -2,7 +2,5 @@ absl-py
 jax
 optax  # optimizers
 tensorflow-datasets
-tensorflow  # needed for tfds and summary
+tbp-nightly  # https://jax.readthedocs.io/en/latest/profiling.html
 flax  # only for checkpoints
-torch  # test-only
-transformers  # test-only
