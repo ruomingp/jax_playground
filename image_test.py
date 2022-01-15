@@ -15,7 +15,10 @@ def _count_batches(dataset, max_batches=100):
 
 class ImagenetInputTest(absltest.TestCase):
     def testIteration(self):
-        cfg = ImagenetInput.default_config().set(name="test", tfds_name="imagenet2012", split="train[:40]", batch_size=8, is_training=False)
+        cfg = ImagenetInput.default_config().set(
+            name="test", tfds_name="imagenet2012", split="train[:40]", global_batch_size=8, is_training=False,
+            data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
+        )
         dataset = cfg.instantiate(parent=None)
         # 40 images / 8.
         self.assertEqual(5, _count_batches(dataset))
