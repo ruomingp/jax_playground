@@ -3,14 +3,15 @@ References:
 - https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
 """
 from typing import Optional
+
+import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 from absl import logging
 
 import config as config_lib
-from module import Module
 import utils
-
+from module import Module
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
@@ -34,7 +35,7 @@ class ImagenetInput(Module):
             "The shuffle buffer size (only used when is_training=True).",
         )
         cfg.define("shuffle_seed", None, "The shuffle seed.")
-        cfg.define("prefetch_buffer_size", 1024, "The prefetch buffer size.")
+        cfg.define("prefetch_buffer_size", tf.data.AUTOTUNE, "The prefetch buffer size.")
         cfg.define("image_size", (224, 224), "The image size.")
         return cfg
 
@@ -43,16 +44,19 @@ class ImagenetInput(Module):
         cfg = self.config
         if cfg.is_training is None:
             raise ValueError(f"{self.path()}: is_training must be specified explicitly")
+        # Tune according to https://www.tensorflow.org/datasets/performances.
+        if cfg.is_training:
+            split = tfds.even_splits(cfg.split, n=jax.process_count(), drop_remainder=True)[jax.process_index()]
+        else:
+            split = cfg.split
         ds: tf.data.Dataset = tfds.load(
             name=cfg.tfds_name,
-            split=cfg.split,
+            split=split,
             shuffle_files=cfg.is_training,
             data_dir=cfg.data_dir,
             download=cfg.download,
         )
-        ds = ds.map(
-            self._process_example, num_parallel_calls=tf.data.experimental.AUTOTUNE
-        )
+        ds = ds.map(self._process_example, num_parallel_calls=tf.data.AUTOTUNE)
         if cfg.is_training:
             ds = ds.repeat()
             ds = ds.shuffle(
