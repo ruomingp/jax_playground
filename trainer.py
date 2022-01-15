@@ -146,22 +146,24 @@ class SpmdTrainer(_SpmdRunner):
         return self._state.step.item()
 
     def run(self, prng_key: jax.random.KeyArray, max_step: int):
+        cfg = self.config
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
-        start_time = time.perf_counter()
-        num_steps = 0
-        for input_batch in self.input:
-            prng_key, step_key = jax.random.split(prng_key)
-            self._run_step(step_key, input_batch)
-            num_steps += 1
-            if num_steps % 100 == 0:
-                now = time.perf_counter()
-                logging.info("Average step time: %s seconds", (now - start_time) / num_steps)
-                num_steps = 0
-                start_time = now
-            if self.step >= max_step:
-                break
+        with jax.profiler.trace(cfg.summary_writer.dir):
+            start_time = time.perf_counter()
+            num_steps = 0
+            for input_batch in self.input:
+                prng_key, step_key = jax.random.split(prng_key)
+                self._run_step(step_key, input_batch)
+                num_steps += 1
+                if num_steps % 100 == 0:
+                    now = time.perf_counter()
+                    logging.info("Average step time: %s seconds", (now - start_time) / num_steps)
+                    num_steps = 0
+                    start_time = now
+                if self.step >= max_step:
+                    break
 
     def _init(self, prng_key: jax.random.KeyArray):
         def _init_state(prng_key: jax.random.KeyArray):
@@ -197,10 +199,11 @@ class SpmdTrainer(_SpmdRunner):
 
     def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
-        prng_key, train_key = jax.random.split(prng_key)
-        # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
-        outputs = self._jit_train_step(train_key, self._state, input_batch)
-        self._state = outputs["state"]
+        with jax.profiler.StepTraceAnnotation('train', step_num=self.step):
+            prng_key, train_key = jax.random.split(prng_key)
+            # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
+            outputs = self._jit_train_step(train_key, self._state, input_batch)
+            self._state = outputs["state"]
         logging.info(
             "Process % 3d step % 8d: loss=%s aux=%s",
             jax.process_index(),

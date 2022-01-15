@@ -25,8 +25,9 @@ class ImagenetInput(Module):
         cfg.define("split", "validation", "The dataset split.")
         cfg.define("batch_size", None, "The batch size.")
         cfg.define("is_training", None, "Whether the examples are used for training.")
+        cfg.define("data_dir", None, "Used for tfds.load. If None, use $HOME/tensorflow_datasets.")
         cfg.define("download", False,
-                   "Whether to download the examples. If false, use the local data under $HOME/tensorflow_datasets.")
+                   "Whether to download the examples. If false, use the local data under data_dir.")
         cfg.define(
             "shuffle_buffer_size",
             4096,
@@ -46,6 +47,7 @@ class ImagenetInput(Module):
             name=cfg.tfds_name,
             split=cfg.split,
             shuffle_files=cfg.is_training,
+            data_dir=cfg.data_dir,
             download=cfg.download,
         )
         ds = ds.map(
