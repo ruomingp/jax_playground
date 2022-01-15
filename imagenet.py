@@ -1,6 +1,6 @@
 """
 On the TPU VM:
-dir=gs://permanent-us-central1-q5loch/${USER}/experiments/imagenet-$(date +%F)a
+dir=gs://permanent-us-central1-q5loch/${USER}/experiments/imagenet-$(date +%F)b
 echo $dir
 python3 imagenet.py --dir=$dir --data_dir=gs://permanent-us-central1-q5loch/tensorflow_datasets 2>&1 | tee /tmp/log
 
