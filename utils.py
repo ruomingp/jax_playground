@@ -43,7 +43,9 @@ def tree_paths(tree, separator="/"):
 
 def flatten_items(tree):
     paths = tree_paths(tree)
-    return zip(jax.tree_flatten(paths), jax.tree_flatten(tree))
+    flat_paths, _ = jax.tree_flatten(paths)
+    flat_values, _ = jax.tree_flatten(tree)
+    return zip(flat_paths, flat_values)
 
 
 def is_named_tuple(x):

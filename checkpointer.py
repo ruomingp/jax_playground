@@ -1,12 +1,12 @@
-from typing import Any, Dict, Optional
+import difflib
+from typing import Any, Dict, List, Optional
 
 import jax
 from flax.training import checkpoints as flax_checkpoints
 
 import config as config_lib
-from module import Module
-
-State = Dict[str, Any]
+import utils
+from module import Module, NestedTensor
 
 
 class Checkpointer(Module):
@@ -23,52 +23,55 @@ class Checkpointer(Module):
         )
         return cfg
 
-    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
-        super().__init__(cfg, parent=parent)
-        cfg = self.config
-
     @property
     def ckpt_dir(self):
         return f"{self.config.dir}/process_{jax.process_index():03d}"
 
-    def save(self, *, step: int, state: State):
+    def _dtypes_shapes(self, state: NestedTensor):
+        paths = utils.tree_paths(state)
+        dtypes = jax.tree_map(lambda x: x.dtype, state)
+        shapes = jax.tree_map(lambda x: x.shape, state)
+        items = []
+        jax.tree_map(lambda path, dtype, shape: items.append(f"{path}={dtype}{shape}"), paths, dtypes, shapes)
+        return items
+
+    def _checkpoint_target(self, state: NestedTensor):
+        flattened_state, _ = jax.tree_flatten(state)
+        return {
+            # Extract/flatten data structure to store to disk. Flax requires a flattened
+            # data structure to be passed to the checkpointer.
+            "flattened_state": flattened_state,
+            "dtypes_shapes": self._dtypes_shapes(state),
+        }
+
+    def save(self, *, step: int, state: NestedTensor):
         cfg = self.config
         if step % cfg.write_every_n_steps != 0:
             return
-        # Extract/flatten data structure to store to disk. Flax requires a flattened
-        # data structure to be passed to the checkpointer.
-        flattened_state, pytree_state = jax.tree_flatten(state)
-        checkpoint_target = {
-            "flattened_state": flattened_state,
-            # Saves a serialized version of the pytree structure to detect potential
-            # mismatch caused by different versions of saver/restorer.
-            "str_pytree_state": str(pytree_state),
-        }
         flax_checkpoints.save_checkpoint(
             ckpt_dir=self.ckpt_dir,
             step=step,
-            target=checkpoint_target,
+            target=self._checkpoint_target(state),
             keep=cfg.keep_last_n,
             keep_every_n_steps=cfg.keep_every_n_steps,
         )
         # TODO(ruoming): add synchronization across processes.
 
-    def restore(self, *, step: Optional[int] = None, state: State) -> State:
-        flattened_state, pytree_state = jax.tree_flatten(state)
-        str_pytree_state = str(pytree_state)
-        input_target = {
-            "flattened_state": flattened_state,
-            "str_pytree_state": str_pytree_state,
-        }
+    def _diff(self, a: List[str], b: List[str]):
+        if a == b:
+            return None
+        return '\n'.join(difflib.ndiff(a, b))
+
+    def restore(self, *, step: Optional[int] = None, state: NestedTensor) -> NestedTensor:
+        input_target = self._checkpoint_target(state)
         restored_target = flax_checkpoints.restore_checkpoint(
             ckpt_dir=self.ckpt_dir, target=input_target, step=step
         )
-        restored_state = restored_target["flattened_state"]
-        restored_str_pytree_state = restored_target["str_pytree_state"]
-        if restored_str_pytree_state != str_pytree_state:
+        diff = self._diff(restored_target["dtypes_shapes"], input_target["dtypes_shapes"])
+        if diff:
             raise ValueError(
                 "Unable to restore checkpoint. A mismatch between the saved "
-                "checkpoint structure and the current one has been detected "
-                f"(`{restored_str_pytree_state}` vs `{str_pytree_state}`)."
+                "checkpoint tree structure, dtypes, or shapes and the current one has been detected:\n"
+                f"{diff}"
             )
-        return jax.tree_unflatten(pytree_state, restored_state)
+        return jax.tree_unflatten(jax.tree_structure(state), restored_target["flattened_state"])
