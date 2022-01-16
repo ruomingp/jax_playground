@@ -45,10 +45,15 @@ def imagenet_trainer_config():
 
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
-    cfg.input = ImagenetInput.default_config().set(
+    read_parallelism, process_parallelism = 64, 1024
+    cfg = ImagenetInput.default_config().set(
         split="train", is_training=True, global_batch_size=train_batch_size,
         data_dir=FLAGS.data_dir,
-    )
+        read_parallelism=read_parallelism,
+        process_parallelism=process_parallelism,
+        prefetch_buffer_size=read_parallelism * 1024,
+        shuffle_buffer_size=read_parallelism * 1024)
+
     cfg.model = resnet.ResNetModel.resnet18_config()
     cfg.summary_writer.write_every_n_steps = 100
     cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")

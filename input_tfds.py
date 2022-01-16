@@ -1,4 +1,7 @@
-"""Tensorflow Dataset Inputs."""
+"""Tensorflow Dataset Inputs.
+
+https://github.com/mlperf/training_results_v0.6/blob/master/Google/benchmarks/resnet/implementations/tpu-v3-512-resnet/resnet/imagenet_input.py
+"""
 from typing import Optional
 
 import jax
@@ -23,6 +26,8 @@ class TfdsInput(Module):
         cfg.define("data_dir", None, "Used for tfds.load. If None, use $HOME/tensorflow_datasets.")
         cfg.define("download", False,
                    "Whether to download the examples. If false, use the local data under data_dir.")
+        cfg.define("read_parallelism", 64, "The number of parallel calls for read data.")
+        cfg.define("process_parallelism", 64, "The number of parallel calls for processing examples.")
         cfg.define(
             "shuffle_buffer_size",
             None,
@@ -55,19 +60,28 @@ class TfdsInput(Module):
                              f"process_count ({jax.process_count()})")
         batch_size = cfg.global_batch_size // jax.process_count()
         split = tfds.even_splits(split, n=jax.process_count(), drop_remainder=cfg.is_training)[jax.process_index()]
+        read_parallelism = cfg.read_parallelism if cfg.is_training else 1
+        process_parallelism = cfg.process_parallelism if cfg.is_training else 1
+        read_config = tfds.ReadConfig(
+            interleave_cycle_length=read_parallelism,
+            num_parallel_calls_for_interleave_files=read_parallelism,
+            num_parallel_calls_for_decode=process_parallelism)
         ds: tf.data.Dataset = builder.as_dataset(
             split=split,
             shuffle_files=cfg.is_training,
+            read_config=read_config,
         )
-        ds = ds.map(self._process_example, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.map(self._process_example, num_parallel_calls=process_parallelism)
         if cfg.is_training:
-            ds = ds.repeat()
             ds = ds.shuffle(
                 cfg.shuffle_buffer_size,
                 seed=cfg.shuffle_seed,
                 reshuffle_each_iteration=True,
             )
+        # It is safe to drop remainder for eval because we verified that the dataset size is divisible by global_batch_size.
         ds = ds.batch(batch_size, drop_remainder=True)
+        if cfg.is_training:
+            ds = ds.repeat()
         ds = ds.prefetch(cfg.prefetch_buffer_size)
         self._dataset = ds
 
