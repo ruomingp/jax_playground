@@ -1,15 +1,19 @@
-import jax
-from jax import numpy as jnp
-from typing import Dict, Mapping, Sequence, TypeVar, Union
+import numbers
+from typing import Any, Dict, Mapping, Sequence, Tuple, Union
 
+import jax
+import numpy
+from jax import numpy as jnp
 
 Tensor = jnp.ndarray
+NestedTree = Dict[str, Union[Any, "NestedTree"]]
 NestedTensor = Dict[str, Union[Tensor, "NestedTensor"]]
 
 enable_numeric_checks = False
 
 
 def check_numerics(x: Tensor, msg_fmt: str = "", **msg_kwargs):
+    """Checks that all elements in `x` are finite."""
     global enable_numeric_checks
     if enable_numeric_checks:
         assert bool(
@@ -18,11 +22,24 @@ def check_numerics(x: Tensor, msg_fmt: str = "", **msg_kwargs):
     return x
 
 
-def shapes(nested_tensor: NestedTensor) -> NestedTensor:
+def shapes(nested_tensor: NestedTensor) -> NestedTree:
+    """Returns a tree of the same structure as `nested_tensor` but with corresponding shapes instead of tensors."""
     return jax.tree_map(lambda x: x.shape, nested_tensor)
 
 
-def tree_paths(tree, separator="/"):
+def tree_paths(tree: NestedTree, separator="/") -> NestedTree:
+    """Returns a tree of the same structure as `nested_tensor` but with corresponding paths instead of values.
+
+    E.g.,
+        tree_paths({'a': 1, 'b': [2, {'c': 3}]}) = {'a': 'a', 'b': ['b/0', {'c': 'b/1/c'}]}
+
+    Args:
+        tree: a nested structure.
+        separator: the separator between parts of a path.
+
+    Returns:
+        A nested structure with the same structure as `tree`.
+    """
     def _concat(prefix, suffix):
         return f"{prefix}{separator}{suffix}" if prefix else f"{suffix}"
 
@@ -41,11 +58,12 @@ def tree_paths(tree, separator="/"):
     return visit(tree, "")
 
 
-def flatten_items(tree):
-    paths = tree_paths(tree)
+def flatten_items(tree: NestedTensor, separator="/") -> Sequence[Tuple[str, Tensor]]:
+    """Flattens `tree` and returns a list of (path, value) pairs."""
+    paths = tree_paths(tree, separator=separator)
     flat_paths, _ = jax.tree_flatten(paths)
     flat_values, _ = jax.tree_flatten(tree)
-    return zip(flat_paths, flat_values)
+    return list(zip(flat_paths, flat_values))
 
 
 def is_named_tuple(x):
@@ -63,8 +81,18 @@ def is_named_tuple(x):
 
 
 def as_tensor(x):
+    """Converts `x` to Tensor recursively.
+
+    Args:
+        x: a jnp array, numpy array, TF/PyTorch Tensor, or a nested structure of arrays or Tensors.
+
+    Returns:
+        A nested structure with the same structure as `x` but with values converted to Tensors.
+    """
     if isinstance(x, Tensor):
         return x
+    if isinstance(x, (numbers.Number, numpy.ndarray)):
+        return jnp.asarray(x)
     if hasattr(x, "numpy"):
         return jnp.asarray(x.numpy())
     if isinstance(x, (Mapping, Sequence)):
