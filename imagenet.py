@@ -45,12 +45,13 @@ def imagenet_trainer_config():
 
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
-    read_parallelism, process_parallelism = 64, 1024
+    read_parallelism = 1
     cfg = ImagenetInput.default_config().set(
         split="train", is_training=True, global_batch_size=train_batch_size,
         data_dir=FLAGS.data_dir,
         read_parallelism=read_parallelism,
-        process_parallelism=process_parallelism,
+        decode_parallelism=128,
+        process_parallelism=1024,
         prefetch_buffer_size=read_parallelism * 1024,
         shuffle_buffer_size=read_parallelism * 1024)
 
