@@ -1,9 +1,22 @@
-from typing import NamedTuple, Tuple
+from typing import Callable, NamedTuple, Tuple, Union
 
 import optax
 
-import config
+import config as config_lib
 from module import Module, NestedTensor, NestedPartitionSpec
+
+
+def sgd_optimizer(learning_rate: Union[float, Callable[[int], float], config_lib.InstantiableConfig],
+                  momentum: float,
+                  weight_decay: float) -> optax.GradientTransformation:
+    if isinstance(learning_rate, config_lib.InstantiableConfig):
+        learning_rate = learning_rate.instantiate()
+    return optax.chain(
+        optax.sgd(
+            learning_rate=learning_rate,
+            momentum=momentum,
+        ),
+        optax.add_decayed_weights(weight_decay))
 
 
 class LearnerState(NamedTuple):
@@ -17,11 +30,11 @@ class Learner(Module):
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("optimizer", None, "The optimizer config.")
-        cfg.define("weight_decay", None, "The weight decay.")
         return cfg
 
     def __init__(self, cfg: config.Config, *, parent: Module):
         super().__init__(cfg, parent=parent)
+        cfg = self.config
         self.optimizer: optax.GradientTransformation = cfg.optimizer.instantiate()
 
     def create_state_partition_specs(

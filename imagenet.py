@@ -10,6 +10,7 @@ gcloud auth application-default login
 tensorboard --logdir=$dir/summaries
 """
 import os.path
+from functools import partial
 
 import jax
 import optax
@@ -20,6 +21,7 @@ from jax.experimental import mesh_utils
 import config as config_lib
 import learner
 import resnet
+import schedule
 from image import ImagenetInput
 from trainer import SpmdTrainer, SpmdEvaler
 
@@ -32,7 +34,6 @@ flags.DEFINE_string(
 flags.DEFINE_string("data_dir", None, "The tfds directory. If None, uses ~/tensorflow_datasets.")
 flags.DEFINE_list("mesh_shape", [8, 1], "The global device mesh shape for (data, model).")
 flags.DEFINE_integer("jax_profiler_port", 9999, "The profiler port.")
-
 
 FLAGS = flags.FLAGS
 
@@ -77,14 +78,13 @@ def imagenet_trainer_config():
         evaler_cfg.input.set(is_training=False, global_batch_size=eval_batch_size, data_dir=FLAGS.data_dir)
         evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
 
-    def learning_rate_schedule(step: int) -> float:
-        stage = step // (steps_per_epoch * 30)
-        return 0.1 * (10 ** -stage)
+    learning_rate = config_lib.InstantiableConfig.for_function(schedule.stepwise).set(
+        sub=[0.1, 0.01, 0.001], start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
+    )
 
     cfg.learner = learner.Learner.default_config().set(
-        weight_decay=1e-4,
-        optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(
-            learning_rate=learning_rate_schedule, momentum=0.9
+        optimizer=config_lib.InstantiableConfig.for_function(learner.sgd_optimizer).set(
+            learning_rate=learning_rate, momentum=0.9, weight_decay=1e-4,
         ),
     )
     return cfg
