@@ -17,21 +17,32 @@ class PartitionedGradientTransformation(NamedTuple):
 
 
 def chain(*elements):
-    base = optax.chain(*[optax.GradientTransformation(init=e.init, update=e.update) for e in elements])
+    base = optax.chain(
+        *[optax.GradientTransformation(init=e.init, update=e.update) for e in elements]
+    )
 
     def partition(input_partition_spec):
         return tuple(e.partition(input_partition_spec) for e in elements)
 
-    return PartitionedGradientTransformation(init=base.init, update=base.update, partition=partition)
+    return PartitionedGradientTransformation(
+        init=base.init, update=base.update, partition=partition
+    )
 
 
-def copy_partition(base: optax.GradientTransformation) -> PartitionedGradientTransformation:
-    return PartitionedGradientTransformation(init=base.init, update=base.update,
-                                             partition=lambda partition_spec: copy.deepcopy(partition_spec))
+def copy_partition(
+    base: optax.GradientTransformation,
+) -> PartitionedGradientTransformation:
+    return PartitionedGradientTransformation(
+        init=base.init,
+        update=base.update,
+        partition=lambda partition_spec: copy.deepcopy(partition_spec),
+    )
 
 
 def replicate(base: optax.GradientTransformation) -> PartitionedGradientTransformation:
-    return PartitionedGradientTransformation(init=base.init, update=base.update, partition=lambda partition_spec: None)
+    return PartitionedGradientTransformation(
+        init=base.init, update=base.update, partition=lambda partition_spec: None
+    )
 
 
 def scale_from_learning_rate(learning_rate: schedule.Schedule):
@@ -41,17 +52,18 @@ def scale_from_learning_rate(learning_rate: schedule.Schedule):
         lr = learning_rate_fn(step)
         context = current_context()
         if context:
-            context.add_summary('lr_schedule_step', step)
-            context.add_summary('learning_rate', lr)
+            context.add_summary("lr_schedule_step", step)
+            context.add_summary("learning_rate", lr)
         return -lr
 
     return scale
 
 
-def sgd_optimizer(learning_rate: schedule.Schedule,
-                  momentum: float = 0,
-                  weight_decay: float = 0,
-                  ) -> PartitionedGradientTransformation:
+def sgd_optimizer(
+    learning_rate: schedule.Schedule,
+    momentum: float = 0,
+    weight_decay: float = 0,
+) -> PartitionedGradientTransformation:
     return chain(
         copy_partition(optax.trace(decay=momentum)),
         replicate(optax.add_decayed_weights(weight_decay)),
@@ -78,15 +90,17 @@ class Learner(Module):
         self.optimizer: PartitionedGradientTransformation = cfg.optimizer.instantiate()
 
     def create_state_partition_specs(
-            self, model_param_partition_specs: NestedPartitionSpec
+        self, model_param_partition_specs: NestedPartitionSpec
     ):
-        return LearnerState(optimizer=self.optimizer.partition(model_param_partition_specs))
+        return LearnerState(
+            optimizer=self.optimizer.partition(model_param_partition_specs)
+        )
 
     def init(self, model_params: NestedTensor) -> LearnerState:
         return LearnerState(optimizer=self.optimizer.init(model_params))
 
     def update(
-            self, *, step: Tensor, gradients: NestedTensor, model_params: NestedTensor
+        self, *, step: Tensor, gradients: NestedTensor, model_params: NestedTensor
     ) -> NestedTensor:
         """Computes `model_params` updates with `gradients`."""
         parameter_updates, optimizer_state = self.optimizer.update(

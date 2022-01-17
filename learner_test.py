@@ -1,12 +1,13 @@
 import jax.nn
+import numpy as np
 import optax
 from absl.testing import absltest, parameterized
-from learner import Learner, sgd_optimizer
 from jax import numpy as jnp
-from module import functional as F, OutputCollection
-import numpy as np
-from config import config_for_function
+
 import utils
+from config import config_for_function
+from learner import Learner, LearnerState, sgd_optimizer
+from module import functional as F, OutputCollection, PartitionSpec
 
 
 class LearnerTest(parameterized.TestCase):
@@ -89,7 +90,9 @@ class LearnerTest(parameterized.TestCase):
             output_collection.keys(),
         )
         summaries = output_collection[OutputCollection.SECTION_SUMMARY]
-        self.assertEqual({"learning_rate": learning_rate(step), "lr_schedule_step": 0}, summaries)
+        self.assertEqual(
+            {"learning_rate": learning_rate(step), "lr_schedule_step": 0}, summaries
+        )
         state_updates = output_collection[OutputCollection.SECTION_STATE_UPDATE]
         self.assertNestedEqual(
             {
@@ -100,6 +103,19 @@ class LearnerTest(parameterized.TestCase):
                 )
             },
             state_updates,
+        )
+
+        self.assertEqual(
+            LearnerState(
+                optimizer=(
+                    PartitionSpec(
+                        ("model",),
+                    ),
+                    None,
+                    None,
+                )
+            ),
+            learner.create_state_partition_specs(PartitionSpec("model")),
         )
 
 
