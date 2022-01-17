@@ -40,14 +40,13 @@ def tree_paths(tree: NestedTree, separator="/") -> NestedTree:
     Returns:
         A nested structure with the same structure as `tree`.
     """
+
     def _concat(prefix, suffix):
         return f"{prefix}{separator}{suffix}" if prefix else f"{suffix}"
 
     def visit(tree, prefix):
         if isinstance(tree, Mapping):
-            return {
-                k: visit(v, _concat(prefix, k)) for k, v in tree.items()
-            }
+            return {k: visit(v, _concat(prefix, k)) for k, v in tree.items()}
         elif is_named_tuple(tree):
             return visit(tree._asdict(), prefix)
         elif isinstance(tree, Sequence):

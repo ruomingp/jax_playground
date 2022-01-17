@@ -17,32 +17,44 @@ def as_schedule_fn(s: Schedule) -> ScheduleFn:
     return s
 
 
-def polynomial(*, begin_step: int = 0, begin_value: float = 0, end_step: int = 1, end_value: float = 0,
-               power: float = 1) -> ScheduleFn:
+def polynomial(
+    *,
+    begin_step: int = 0,
+    begin_value: float = 0,
+    end_step: int = 1,
+    end_value: float = 0,
+    power: float = 1,
+) -> ScheduleFn:
     """A polynomial (linear when power=1) schedule.
-    
+
     Args:
         begin_step: The first step of polynomial schedule.
         begin_value: The begin value of polynomial schedule.
         end_step: The end step of polynomial schedule. Must be > begin_step.
         end_value: The end value of polynomial schedule.
         power: The polynomial power.
-        
+
     Returns:
         A ScheduleFn according to the spec.
     """
     if begin_step >= end_step:
-        raise ValueError(f'begin_step {begin_step} must be < end_step {end_step}.')
+        raise ValueError(f"begin_step {begin_step} must be < end_step {end_step}.")
 
     def fn(step: int) -> float:
         frac = (step - begin_step) / (end_step - begin_step)
-        frac = min(1., max(0., frac))
+        frac = min(1.0, max(0.0, frac))
         return begin_value + (frac ** power) * (end_value - begin_value)
 
     return fn
 
 
-def exponential(*, begin_step: int = 0, begin_value: float = 0, end_step: int = 1, end_value: float = 0) -> ScheduleFn:
+def exponential(
+    *,
+    begin_step: int = 0,
+    begin_value: float = 0,
+    end_step: int = 1,
+    end_value: float = 0,
+) -> ScheduleFn:
     """An exponential schedule.
 
     Args:
@@ -55,12 +67,18 @@ def exponential(*, begin_step: int = 0, begin_value: float = 0, end_step: int = 
         A ScheduleFn according to the spec.
     """
     if begin_step >= end_step:
-        raise ValueError(f'begin_step {begin_step} must be < end_step {end_step}.')
+        raise ValueError(f"begin_step {begin_step} must be < end_step {end_step}.")
     if begin_value <= 0 or end_value <= 0:
-        raise ValueError(f'begin_value ({begin_value}) and end_value ({end_value}) must be both positive.')
+        raise ValueError(
+            f"begin_value ({begin_value}) and end_value ({end_value}) must be both positive."
+        )
 
-    log_fn = polynomial(begin_step=begin_step, begin_value=math.log(begin_value),
-                        end_step=end_step, end_value=math.log(end_value))
+    log_fn = polynomial(
+        begin_step=begin_step,
+        begin_value=math.log(begin_value),
+        end_step=end_step,
+        end_value=math.log(end_value),
+    )
 
     def fn(step: int) -> float:
         return math.exp(log_fn(step))

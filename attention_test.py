@@ -209,9 +209,13 @@ class MultiheadAttentionTest(absltest.TestCase):
         key = jnp.asarray(rng.random([batch_size, src_len, model_dim]))
         value = jnp.asarray(rng.random([batch_size, src_len, model_dim]))
         mask = jnp.ones([batch_size, tgt_len, src_len], dtype=jnp.bool_)
-        layer_outputs, _ = F(layer,
-                             state=layer_params, is_training=True, prng_key=jax.random.PRNGKey(456),
-                             inputs=dict(query=query, key=key, value=value, mask=mask))
+        layer_outputs, _ = F(
+            layer,
+            state=layer_params,
+            is_training=True,
+            prng_key=jax.random.PRNGKey(456),
+            inputs=dict(query=query, key=key, value=value, mask=mask),
+        )
         layer_output_data = layer_outputs.data
         # No NaN.
         self.assertTrue(jnp.all(jnp.isfinite(layer_output_data)), layer_output_data)
@@ -236,9 +240,9 @@ def _parameters_from_roberta_attention(src: hf_roberta.RobertaAttention):
     per_head_dim = src.self.attention_head_size
     results = {"attention": {}}
     for src_proj, dst_proj in (
-            ("query", "q_proj"),
-            ("key", "k_proj"),
-            ("value", "v_proj"),
+        ("query", "q_proj"),
+        ("key", "k_proj"),
+        ("value", "v_proj"),
     ):
         dense = getattr(src.self, src_proj)
         # Note that torch.nn.Linear.weight is (output_dim, input_dim), so we need to transpose it before reshaping.
@@ -261,7 +265,7 @@ def _parameters_from_dense(dense: torch.nn.Linear):
 
 
 def _parameters_from_roberta_feed_forward(
-        intermediate: hf_roberta.RobertaIntermediate, output: hf_roberta.RobertaOutput
+    intermediate: hf_roberta.RobertaIntermediate, output: hf_roberta.RobertaOutput
 ):
     return _to_jtensor(
         dict(
@@ -290,7 +294,7 @@ def _as_torch_tensor(src: jnp.ndarray):
 def _copy_parameters(src: Module, dst: Module):
     with jnp.no_grad():
         for (src_name, src_param), (dst_name, dst_param) in zip(
-                src.named_parameters(), dst.named_parameters()
+            src.named_parameters(), dst.named_parameters()
         ):
             assert src_name == dst_name, f"{src_name} != {dst_name}"
             dst_param.copy_(src_param)
@@ -315,7 +319,7 @@ def _copy_transformer_parameters(src: Module, dst: attention.TransformerLayer):
 
 class TransformerTest(absltest.TestCase):
     def _compare_against_roberta_attention(
-            self, ref: hf_roberta.RobertaAttention, layer: TransformerAttentionLayer
+        self, ref: hf_roberta.RobertaAttention, layer: TransformerAttentionLayer
     ):
         layer_params = layer.initialize_parameters_recursively(
             prng_key=jax.random.PRNGKey(0)
@@ -337,7 +341,8 @@ class TransformerTest(absltest.TestCase):
                 inputs=dict(target=jnp.asarray(target), mask=mask),
                 state=layer_params,
                 is_training=True,
-                prng_key=jax.random.PRNGKey(0))
+                prng_key=jax.random.PRNGKey(0),
+            )
             attn_mask = None if mask is None else _as_torch_tensor(mask)
             (ref_outputs,) = ref.forward(
                 torch.as_tensor(target, dtype=torch.float32),
@@ -369,7 +374,7 @@ class TransformerTest(absltest.TestCase):
         self._compare_against_roberta_attention(ref, layer)
 
     def _compare_against_roberta_layer(
-            self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer
+        self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer
     ):
         layer_params = layer.initialize_parameters_recursively(
             prng_key=jax.random.PRNGKey(0)
@@ -395,9 +400,14 @@ class TransformerTest(absltest.TestCase):
                 state=layer_params,
                 is_training=True,
                 prng_key=jax.random.PRNGKey(0),
-                output_collection_sections=[module.OutputCollection.SECTION_SUMMARY])
-            self.assertEqual({'self_attention': {'attention': {'atten_probs': (2, 4, 6, 6)}}},
-                             _shapes(layer_output_collection[module.OutputCollection.SECTION_SUMMARY]))
+                output_collection_sections=[module.OutputCollection.SECTION_SUMMARY],
+            )
+            self.assertEqual(
+                {"self_attention": {"attention": {"atten_probs": (2, 4, 6, 6)}}},
+                _shapes(
+                    layer_output_collection[module.OutputCollection.SECTION_SUMMARY]
+                ),
+            )
             attn_mask = None if mask is None else _as_torch_tensor(mask)
             (ref_outputs,) = ref.forward(
                 torch.as_tensor(target, dtype=torch.float32),

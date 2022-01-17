@@ -40,7 +40,9 @@ class Checkpointer(Module):
         )
         # TODO(ruoming): add synchronization across processes.
 
-    def restore(self, *, step: Optional[int] = None, state: Optional[NestedTensor] = None) -> NestedTensor:
+    def restore(
+        self, *, step: Optional[int] = None, state: Optional[NestedTensor] = None
+    ) -> NestedTensor:
         """Restores from the checkpoint directory.
 
         Args:
@@ -55,12 +57,15 @@ class Checkpointer(Module):
             ckpt_dir=self.ckpt_dir, target=input_target, step=step
         )
         if state is not None:
-            diff = self._diff(restored_target["dtypes_shapes"], input_target["dtypes_shapes"])
+            diff = self._diff(
+                restored_target["dtypes_shapes"], input_target["dtypes_shapes"]
+            )
             if diff:
                 raise ValueError(
                     "Unable to restore checkpoint. A mismatch between the saved "
                     "checkpoint tree dtypes or shapes and the current one has been detected:\n"
-                    f"{diff}")
+                    f"{diff}"
+                )
         return restored_target["state"]
 
     def _checkpoint_target(self, state: NestedTensor):
@@ -76,10 +81,15 @@ class Checkpointer(Module):
         dtypes = jax.tree_map(lambda x: x.dtype, state)
         shapes = jax.tree_map(lambda x: x.shape, state)
         items = []
-        jax.tree_map(lambda path, dtype, shape: items.append(f"{path}={dtype}{shape}"), paths, dtypes, shapes)
+        jax.tree_map(
+            lambda path, dtype, shape: items.append(f"{path}={dtype}{shape}"),
+            paths,
+            dtypes,
+            shapes,
+        )
         return items
 
     def _diff(self, a: List[str], b: List[str]):
         if a == b:
             return None
-        return '\n'.join(difflib.ndiff(a, b))
+        return "\n".join(difflib.ndiff(a, b))

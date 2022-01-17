@@ -85,7 +85,7 @@ class OutputCollection:
         return self._children[name]
 
     def get_values_recursively(
-            self, section: str = SECTION_DEFAULT
+        self, section: str = SECTION_DEFAULT
     ) -> Dict[str, Union[jnp.ndarray, dict]]:
         results = {}
         if section in self._sections:
@@ -224,7 +224,7 @@ class Module(config_lib.Configurable):
         return f"{type(self)}@{self.path()}"
 
     def _add_child(
-            self, name: str, child_config: config_lib.Config, **kwargs
+        self, name: str, child_config: config_lib.Config, **kwargs
     ) -> "Module":
         if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
             raise ValueError(f'Invalid child name "{name}"')
@@ -300,10 +300,16 @@ class Module(config_lib.Configurable):
         raise ValueError("context.module does not match self")
 
 
-def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTensor,
-               inputs: Union[Sequence[Any], Dict[str, Any]], *,
-               method: str = "forward", is_training: bool,
-               output_collection_sections: Sequence[str] = tuple()) -> Tuple[Any, Dict[str, NestedTensor]]:
+def functional(
+    module: Module,
+    prng_key: jax.random.KeyArray,
+    state: NestedTensor,
+    inputs: Union[Sequence[Any], Dict[str, Any]],
+    *,
+    method: str = "forward",
+    is_training: bool,
+    output_collection_sections: Sequence[str] = tuple(),
+) -> Tuple[Any, Dict[str, NestedTensor]]:
     """Invokes <module>.<method> in a pure functional fashion.
 
     The invocation will not depend on external inputs or have any side effects. The results only depend on the given
@@ -326,7 +332,11 @@ def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTenso
           the corresponding output section. This can be used to collect summaries and module state updates.
     """
     context = InvocationContext(
-        module=module, state=state, output_collection=OutputCollection(), is_training=is_training, prng_key=prng_key,
+        module=module,
+        state=state,
+        output_collection=OutputCollection(),
+        is_training=is_training,
+        prng_key=prng_key,
     )
 
     with root_context(context):
@@ -335,8 +345,10 @@ def functional(module: Module, prng_key: jax.random.KeyArray, state: NestedTenso
         else:
             input_args, input_kwargs = inputs, {}
         method_outputs = getattr(module, method)(*input_args, **input_kwargs)
-    output_collections = {section: context.output_collection.get_values_recursively(section) for section in
-                          output_collection_sections}
+    output_collections = {
+        section: context.output_collection.get_values_recursively(section)
+        for section in output_collection_sections
+    }
     return method_outputs, output_collections
 
 
@@ -425,9 +437,9 @@ class BaseLayer(Module):
         return {}
 
     def initialize_parameters_recursively(
-            self,
-            prng_key: jax.random.KeyArray,
-            param_specs: Optional[NestedParameterSpec] = None,
+        self,
+        prng_key: jax.random.KeyArray,
+        param_specs: Optional[NestedParameterSpec] = None,
     ) -> NestedTensor:
         if param_specs is None:
             param_specs = self.create_parameter_specs_recursively()
@@ -445,7 +457,7 @@ class BaseLayer(Module):
         return params
 
     def _initialize_parameter(
-            self, name: str, *, prng_key: jax.random.KeyArray, parameter_spec: ParameterSpec
+        self, name: str, *, prng_key: jax.random.KeyArray, parameter_spec: ParameterSpec
     ) -> Tensor:
         """Adds a parameter with the given name and shape.
 

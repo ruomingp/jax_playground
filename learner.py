@@ -6,9 +6,11 @@ import config as config_lib
 from module import Module, NestedTensor, NestedPartitionSpec
 
 
-def sgd_optimizer(learning_rate: Union[float, Callable[[int], float], config_lib.InstantiableConfig],
-                  momentum: float,
-                  weight_decay: float) -> optax.GradientTransformation:
+def sgd_optimizer(
+    learning_rate: Union[float, Callable[[int], float], config_lib.InstantiableConfig],
+    momentum: float,
+    weight_decay: float,
+) -> optax.GradientTransformation:
     if isinstance(learning_rate, config_lib.InstantiableConfig):
         learning_rate = learning_rate.instantiate()
     return optax.chain(
@@ -16,7 +18,8 @@ def sgd_optimizer(learning_rate: Union[float, Callable[[int], float], config_lib
             learning_rate=learning_rate,
             momentum=momentum,
         ),
-        optax.add_decayed_weights(weight_decay))
+        optax.add_decayed_weights(weight_decay),
+    )
 
 
 class LearnerState(NamedTuple):
@@ -42,7 +45,9 @@ class Learner(Module):
     ):
         cfg = self.config
         if cfg.optimizer.cls == optax.sgd:
-            return LearnerState(optimizer=(optax.TraceState(trace=model_param_partition_specs), None))
+            return LearnerState(
+                optimizer=(optax.TraceState(trace=model_param_partition_specs), None)
+            )
         raise NotImplementedError(cfg.optimizer)
 
     def init(self, model_params: NestedTensor) -> LearnerState:

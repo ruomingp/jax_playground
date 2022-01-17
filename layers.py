@@ -49,12 +49,8 @@ class LayerNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(
-                shape=[cfg.dim], partition_spec=(None,)
-            ),
-            "bias": ParameterSpec(
-                shape=[cfg.dim], partition_spec=(None,)
-            ),
+            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -82,9 +78,7 @@ class RMSNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(
-                shape=[cfg.dim], partition_spec=(None,)
-            ),
+            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -112,12 +106,8 @@ class BatchNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(
-                shape=[cfg.dim], partition_spec=(None,)
-            ),
-            "bias": ParameterSpec(
-                shape=[cfg.dim], partition_spec=(None,)
-            ),
+            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
             "moving_mean": ParameterSpec(
                 shape=[cfg.dim],
                 dtype=jnp.float32,
@@ -175,11 +165,13 @@ class Linear(BaseLayer):
         params = dict(
             weight=ParameterSpec(
                 shape=(cfg.input_dim, cfg.output_dim),
-                partition_spec=cfg.param_partition_spec))
+                partition_spec=cfg.param_partition_spec,
+            )
+        )
         if cfg.bias:
             params["bias"] = ParameterSpec(
-                shape=[cfg.output_dim],
-                partition_spec=(cfg.param_partition_spec[-1],))
+                shape=[cfg.output_dim], partition_spec=(cfg.param_partition_spec[-1],)
+            )
         return params
 
     def forward(self, x: Tensor) -> Tensor:
@@ -219,11 +211,13 @@ class Conv2D(BaseLayer):
         params = dict(
             weight=ParameterSpec(
                 shape=list(cfg.window) + [cfg.input_dim, cfg.output_dim],
-                partition_spec=cfg.param_partition_spec))
+                partition_spec=cfg.param_partition_spec,
+            )
+        )
         if cfg.bias:
             params["bias"] = ParameterSpec(
-                shape=[cfg.output_dim],
-                partition_spec=(cfg.param_partition_spec[-1],))
+                shape=[cfg.output_dim], partition_spec=(cfg.param_partition_spec[-1],)
+            )
         return params
 
     def forward(self, x: Tensor) -> Tensor:

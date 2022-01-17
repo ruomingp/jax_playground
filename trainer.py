@@ -73,8 +73,10 @@ class _SpmdRunner(Module):
         return None
 
     def _state_sharding(self):
-        return _TrainerState(step=None,
-            model=self._parameter_sharding(), learner=self._parameter_sharding()
+        return _TrainerState(
+            step=None,
+            model=self._parameter_sharding(),
+            learner=self._parameter_sharding(),
         )
 
     def _input_sharding(self):
@@ -159,7 +161,9 @@ class SpmdTrainer(_SpmdRunner):
                 num_steps += 1
                 if num_steps % 100 == 0:
                     now = time.perf_counter()
-                    logging.info("Average step time: %s seconds", (now - start_time) / num_steps)
+                    logging.info(
+                        "Average step time: %s seconds", (now - start_time) / num_steps
+                    )
                     num_steps = 0
                     start_time = now
                 if self.step >= max_step:
@@ -171,7 +175,11 @@ class SpmdTrainer(_SpmdRunner):
                 prng_key, self._model_param_specs
             )
             learner_params = self.learner.init(model_params)
-            return _TrainerState(step=jnp.zeros([], dtype=jnp.int64), model=model_params, learner=learner_params)
+            return _TrainerState(
+                step=jnp.zeros([], dtype=jnp.int64),
+                model=model_params,
+                learner=learner_params,
+            )
 
         init_computation = self._jit(
             _init_state,
@@ -191,7 +199,9 @@ class SpmdTrainer(_SpmdRunner):
         try:
             self._state = self.checkpointer.restore(step=None, state=self._state)
         except Exception as e:
-            logging.info(f"Failed to restore checkpoint. This is expected when we start training a model: {e}")
+            logging.info(
+                f"Failed to restore checkpoint. This is expected when we start training a model: {e}"
+            )
         finally:
             # Save the initial ckpt for debugging.
             # self.checkpointer.save(step=self.step, state=self._state)
@@ -199,7 +209,7 @@ class SpmdTrainer(_SpmdRunner):
 
     def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
-        with jax.profiler.StepTraceAnnotation('train', step_num=self.step):
+        with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             prng_key, train_key = jax.random.split(prng_key)
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(train_key, self._state, input_batch)
@@ -211,7 +221,9 @@ class SpmdTrainer(_SpmdRunner):
             outputs["loss"],
             jax.tree_map(lambda x: x.item(), outputs["aux"]),
         )
-        self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
+        self.summary_writer(
+            self.step, {"loss": outputs["loss"], **outputs["summaries"]}
+        )
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
@@ -220,17 +232,25 @@ class SpmdTrainer(_SpmdRunner):
         self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
-            self,
-            prng_key: jax.random.KeyArray,
-            state: _TrainerState,
-            input_batch: Dict[str, Any],
+        self,
+        prng_key: jax.random.KeyArray,
+        state: _TrainerState,
+        input_batch: Dict[str, Any],
     ):
         prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
 
         def _forward(model_parameters, input_batch):
             (loss, aux), model_output_collection = F(
-                self.model, state=model_parameters, is_training=True, prng_key=forward_key, inputs=input_batch,
-                output_collection_sections=(OutputCollection.SECTION_SUMMARY, OutputCollection.SECTION_STATE_UPDATE))
+                self.model,
+                state=model_parameters,
+                is_training=True,
+                prng_key=forward_key,
+                inputs=input_batch,
+                output_collection_sections=(
+                    OutputCollection.SECTION_SUMMARY,
+                    OutputCollection.SECTION_STATE_UPDATE,
+                ),
+            )
             return loss, dict(aux=aux, **model_output_collection)
 
         _forward_and_grad = jax.value_and_grad(_forward, has_aux=True)
@@ -239,14 +259,19 @@ class SpmdTrainer(_SpmdRunner):
         )
 
         (updated_learner_state, updated_model_params), learner_output_collection = F(
-            self.learner, method="update",
-            state=None, is_training=True, prng_key=learner_key,
+            self.learner,
+            method="update",
+            state=None,
+            is_training=True,
+            prng_key=learner_key,
             inputs=dict(state=state.learner, model_params=state.model, gradients=grads),
-            output_collection_sections=[OutputCollection.SECTION_SUMMARY])
+            output_collection_sections=[OutputCollection.SECTION_SUMMARY],
+        )
         updated_state = _TrainerState(
             step=state.step + 1,
             model=_apply_updates(
-                updated_model_params, forward_output_collection[OutputCollection.SECTION_STATE_UPDATE]
+                updated_model_params,
+                forward_output_collection[OutputCollection.SECTION_STATE_UPDATE],
             ),
             learner=updated_learner_state,
         )
@@ -276,18 +301,23 @@ class SpmdEvaler(_SpmdRunner):
         return cfg
 
     def run_step(
-            self,
-            step: int,
-            prng_key: jax.random.KeyArray,
-            *,
-            model: Module,
-            model_params: NestedTensor
+        self,
+        step: int,
+        prng_key: jax.random.KeyArray,
+        *,
+        model: Module,
+        model_params: NestedTensor,
     ):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
             return
         _jit_eval_batch = self._jit(
-            partial(F, model, is_training=False, output_collection_sections=[OutputCollection.SECTION_SUMMARY]),
+            partial(
+                F,
+                model,
+                is_training=False,
+                output_collection_sections=[OutputCollection.SECTION_SUMMARY],
+            ),
             in_axis_resources=(
                 None,  # prng_key
                 self._parameter_sharding(),
@@ -300,9 +330,13 @@ class SpmdEvaler(_SpmdRunner):
         num_batches = 0
         for input_batch in self.input:
             prng_key, batch_key = jax.random.split(prng_key)
-            (_, aux), output_collection = _jit_eval_batch(batch_key, model_params, input_batch)
+            (_, aux), output_collection = _jit_eval_batch(
+                batch_key, model_params, input_batch
+            )
             if num_batches == 0:
-                self.summary_writer(step, output_collection[OutputCollection.SECTION_SUMMARY])
+                self.summary_writer(
+                    step, output_collection[OutputCollection.SECTION_SUMMARY]
+                )
             num_batches += 1
             logging.info(
                 "Process % 3d step % 8d batch % 8d: %s.metrics=%s",
@@ -310,7 +344,8 @@ class SpmdEvaler(_SpmdRunner):
                 step,
                 num_batches,
                 self.path(),
-                jax.tree_map(lambda x: x.item(), aux))
+                jax.tree_map(lambda x: x.item(), aux),
+            )
             metric_accumulator.update(aux)
         summaries = metric_accumulator.summaries()
         logging.info(

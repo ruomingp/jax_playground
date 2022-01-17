@@ -35,9 +35,7 @@ def _copy(src: jnp.ndarray, dst: torch.nn.Parameter):
         dst.copy_(src)
 
 
-def _initialize_parameters_recursively(
-        prng_key: jax.random.KeyArray, layer: BaseLayer
-):
+def _initialize_parameters_recursively(prng_key: jax.random.KeyArray, layer: BaseLayer):
     param_specs = layer.create_parameter_specs_recursively()
     params = layer.initialize_parameters_recursively(prng_key, param_specs)
     return param_specs, params
@@ -63,7 +61,13 @@ class LayerTest(parameterized.TestCase):
         orig_inputs = jax.random.normal(input_key, [2, 3, dim])
         inputs = orig_inputs.copy()
 
-        outputs, _ = F(layer, inputs=(inputs,), is_training=True, state=layer_params, prng_key=prng_key)
+        outputs, _ = F(
+            layer,
+            inputs=(inputs,),
+            is_training=True,
+            state=layer_params,
+            prng_key=prng_key,
+        )
         # forward() should not mutate 'inputs' in-place.
         _assert_allclose(inputs, orig_inputs)
         # The output mean should be close to 0.
@@ -76,7 +80,13 @@ class LayerTest(parameterized.TestCase):
         # Set scales to 2.
         layer_params2 = copy.deepcopy(layer_params)
         layer_params2["scale"] *= 2
-        outputs, _ = F(layer, inputs=(inputs,), is_training=True, state=layer_params2, prng_key=prng_key)
+        outputs, _ = F(
+            layer,
+            inputs=(inputs,),
+            is_training=True,
+            state=layer_params2,
+            prng_key=prng_key,
+        )
         # The output mean should be close to 0.
         output_mean = outputs.mean(axis=-1, keepdims=True)
         _assert_allclose(output_mean, np.zeros_like(output_mean))
@@ -103,7 +113,13 @@ class LayerTest(parameterized.TestCase):
         orig_inputs = jax.random.normal(input_key, [2, 3, dim])
         inputs = orig_inputs.copy()
 
-        outputs, _ = F(layer, inputs=(inputs,), is_training=True, state=layer_params, prng_key=prng_key)
+        outputs, _ = F(
+            layer,
+            inputs=(inputs,),
+            is_training=True,
+            state=layer_params,
+            prng_key=prng_key,
+        )
         # forward() should not mutate 'inputs' in-place.
         _assert_allclose(inputs, orig_inputs)
         # The output_norm should be close to sqrt(dim).
@@ -113,7 +129,13 @@ class LayerTest(parameterized.TestCase):
         # Set scales to 2.
         layer_params2 = copy.deepcopy(layer_params)
         layer_params2["scale"] *= 2
-        outputs, _ = F(layer, inputs=(inputs,), is_training=True, state=layer_params2, prng_key=prng_key)
+        outputs, _ = F(
+            layer,
+            inputs=(inputs,),
+            is_training=True,
+            state=layer_params2,
+            prng_key=prng_key,
+        )
         output_norm = jnp.sqrt((outputs ** 2).sum(axis=-1))
         # The output_norm should be close to 2 * sqrt(dim).
         _assert_allclose(output_norm, np.ones_like(output_norm) * 2.0 * math.sqrt(dim))
@@ -141,10 +163,19 @@ class LayerTest(parameterized.TestCase):
         inputs = orig_inputs.copy()
 
         for is_training in (True, False):
-            outputs, output_collection = F(layer, inputs=(inputs,), is_training=is_training, state=layer_params,
-                                           prng_key=prng_key,
-                                           output_collection_sections=[module.OutputCollection.SECTION_STATE_UPDATE])
-            param_updates = output_collection[module.OutputCollection.SECTION_STATE_UPDATE]
+            outputs, output_collection = F(
+                layer,
+                inputs=(inputs,),
+                is_training=is_training,
+                state=layer_params,
+                prng_key=prng_key,
+                output_collection_sections=[
+                    module.OutputCollection.SECTION_STATE_UPDATE
+                ],
+            )
+            param_updates = output_collection[
+                module.OutputCollection.SECTION_STATE_UPDATE
+            ]
             if is_training:
                 # The output mean should be close to 0.
                 output_mean = jnp.mean(outputs, axis=(0, 1), keepdims=True)
@@ -204,7 +235,13 @@ class LayerTest(parameterized.TestCase):
         inputs = orig_inputs.copy()
 
         # Compute layer outputs.
-        outputs, _ = F(layer, inputs=(inputs,), is_training=True, state=layer_params, prng_key=prng_key)
+        outputs, _ = F(
+            layer,
+            inputs=(inputs,),
+            is_training=True,
+            state=layer_params,
+            prng_key=prng_key,
+        )
 
         # Compute ref outputs.
         ref = torch.nn.Linear(in_features=input_dim, out_features=output_dim)
@@ -225,10 +262,10 @@ class LayerTest(parameterized.TestCase):
         ("3x3_S2_PADDING1", (3, 3), (2, 2), (1, 1)),
     )
     def testConv2D(
-            self,
-            window: Tuple[int, int],
-            strides: Tuple[int, int],
-            padding: Union[str, Tuple[int, int]],
+        self,
+        window: Tuple[int, int],
+        strides: Tuple[int, int],
+        padding: Union[str, Tuple[int, int]],
     ):
         input_dim, output_dim = 4, 6
         if isinstance(padding, tuple):
@@ -270,7 +307,13 @@ class LayerTest(parameterized.TestCase):
         inputs = jax.random.normal(input_key, [2, 7, 7, input_dim])
 
         # Compute layer outputs.
-        outputs, _ = F(layer, inputs=(inputs,), is_training=True, state=layer_params, prng_key=prng_key)
+        outputs, _ = F(
+            layer,
+            inputs=(inputs,),
+            is_training=True,
+            state=layer_params,
+            prng_key=prng_key,
+        )
 
         # Compute ref outputs.
         ref_padding = padding.lower() if isinstance(padding, str) else padding

@@ -62,12 +62,16 @@ import tensorflow_datasets as tfds
 
 read_parallelism, decode_parallelism, process_parallelism = 1, 128, 1024
 cfg = ImagenetInput.default_config().set(
-    name="benchmark", split="train", is_training=True,
+    name="benchmark",
+    split="train",
+    is_training=True,
     prefetch_buffer_size=read_parallelism * 1024,
     shuffle_buffer_size=read_parallelism * 1024,
     read_parallelism=read_parallelism,
     decode_parallelism=decode_parallelism,
     process_parallelism=process_parallelism,
-    global_batch_size=256, data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets")
+    global_batch_size=256,
+    data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
+)
 inputs = cfg.instantiate(parent=None)
 print(tfds.benchmark(inputs, batch_size=256, num_iter=500).stats)

@@ -15,7 +15,6 @@ from module import Module
 
 
 class TfdsInput(Module):
-
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
@@ -23,19 +22,36 @@ class TfdsInput(Module):
         cfg.define("split", None, "The dataset split.")
         cfg.define("global_batch_size", None, "The global batch size.")
         cfg.define("is_training", None, "Whether the examples are used for training.")
-        cfg.define("data_dir", None, "Used for tfds.load. If None, use $HOME/tensorflow_datasets.")
-        cfg.define("download", False,
-                   "Whether to download the examples. If false, use the local data under data_dir.")
+        cfg.define(
+            "data_dir",
+            None,
+            "Used for tfds.load. If None, use $HOME/tensorflow_datasets.",
+        )
+        cfg.define(
+            "download",
+            False,
+            "Whether to download the examples. If false, use the local data under data_dir.",
+        )
         cfg.define("read_parallelism", 8, "The number of parallel calls for read data.")
-        cfg.define("decode_parallelism", 8, "The number of parallel calls for decoding examples.")
-        cfg.define("process_parallelism", 1024, "The number of parallel calls for processing examples.")
+        cfg.define(
+            "decode_parallelism",
+            8,
+            "The number of parallel calls for decoding examples.",
+        )
+        cfg.define(
+            "process_parallelism",
+            1024,
+            "The number of parallel calls for processing examples.",
+        )
         cfg.define(
             "shuffle_buffer_size",
             None,
             "The shuffle buffer size (only used when is_training=True).",
         )
         cfg.define("shuffle_seed", None, "The shuffle seed.")
-        cfg.define("prefetch_buffer_size", tf.data.AUTOTUNE, "The prefetch buffer size.")
+        cfg.define(
+            "prefetch_buffer_size", tf.data.AUTOTUNE, "The prefetch buffer size."
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
@@ -53,21 +69,28 @@ class TfdsInput(Module):
             split_ds = builder.as_dataset(split=cfg.split, batch_size=1)
             num_examples = len(split_ds)
             if num_examples % cfg.global_batch_size != 0:
-                raise ValueError(f"Evaluation dataset size ({num_examples}) must be divisible by "
-                                 f"global_batch_size ({cfg.global_batch_size}")
+                raise ValueError(
+                    f"Evaluation dataset size ({num_examples}) must be divisible by "
+                    f"global_batch_size ({cfg.global_batch_size}"
+                )
         split = cfg.split
         if cfg.global_batch_size % jax.process_count() != 0:
-            raise ValueError(f"global_batch_size ({cfg.global_batch_size} must be divisible by "
-                             f"process_count ({jax.process_count()})")
+            raise ValueError(
+                f"global_batch_size ({cfg.global_batch_size} must be divisible by "
+                f"process_count ({jax.process_count()})"
+            )
         batch_size = cfg.global_batch_size // jax.process_count()
-        split = tfds.even_splits(split, n=jax.process_count(), drop_remainder=cfg.is_training)[jax.process_index()]
+        split = tfds.even_splits(
+            split, n=jax.process_count(), drop_remainder=cfg.is_training
+        )[jax.process_index()]
         read_parallelism = cfg.read_parallelism if cfg.is_training else 1
         decode_parallelism = cfg.decode_parallelism if cfg.is_training else 1
         process_parallelism = cfg.process_parallelism if cfg.is_training else 1
         read_config = tfds.ReadConfig(
             interleave_cycle_length=read_parallelism,
             num_parallel_calls_for_interleave_files=read_parallelism,
-            num_parallel_calls_for_decode=decode_parallelism)
+            num_parallel_calls_for_decode=decode_parallelism,
+        )
         ds: tf.data.Dataset = builder.as_dataset(
             split=split,
             shuffle_files=cfg.is_training,

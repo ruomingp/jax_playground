@@ -442,16 +442,12 @@ class TransformerFeedForwardLayer(BaseLayer):
         cfg.define("hidden_dim", 0, "The hidden dim.")
         cfg.define(
             "linear1",
-            Linear.default_config().set(
-                param_partition_spec=[None, "model"]
-            ),
+            Linear.default_config().set(param_partition_spec=[None, "model"]),
             "Config for the first linear layer.",
         )
         cfg.define(
             "linear2",
-            Linear.default_config().set(
-                param_partition_spec=["model", None]
-            ),
+            Linear.default_config().set(param_partition_spec=["model", None]),
             "Config for the second linear layer.",
         )
         cfg.define(

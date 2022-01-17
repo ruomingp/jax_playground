@@ -12,7 +12,6 @@ config_for_function = InstantiableConfig.for_function
 
 
 class ScheduleTest(absltest.TestCase):
-
     def testConstant(self):
         value = 3.14
         s = as_schedule_fn(value)
@@ -31,13 +30,17 @@ class ScheduleTest(absltest.TestCase):
                 self.assertEqual(step / 10, value)
 
     def testSqrt(self):
-        s = schedule.polynomial(power=0.5, begin_step=0, begin_value=0, end_step=100, end_value=10)
+        s = schedule.polynomial(
+            power=0.5, begin_step=0, begin_value=0, end_step=100, end_value=10
+        )
         for step in range(10):
             value = s(step)
             self.assertEqual(math.sqrt(step / 100) * 10, value)
 
     def testExponential(self):
-        s = schedule.exponential(begin_step=0, begin_value=1, end_step=100, end_value=0.01)
+        s = schedule.exponential(
+            begin_step=0, begin_value=1, end_step=100, end_value=0.01
+        )
         self.assertAlmostEqual(1, s(0))
         self.assertAlmostEqual(0.1, s(50))
         self.assertAlmostEqual(0.01, s(100))
@@ -55,10 +58,11 @@ class ScheduleTest(absltest.TestCase):
             sub=[
                 schedule.polynomial(end_step=100, end_value=0.1),
                 lambda step: schedule.inverse_sqrt(step + 100),
-            ])
+            ],
+        )
         for step in range(200):
             value = s(step)
-            logging.info('step=%s value=%s', step, value)
+            logging.info("step=%s value=%s", step, value)
             if step <= 100:
                 self.assertAlmostEqual((step / 100) * 0.1, value)
             else:

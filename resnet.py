@@ -30,7 +30,11 @@ class Downsample(BaseLayer):
         cfg.define("stride", 1, "The convolution stride.")
         cfg.define(
             "conv",
-            Conv2D.default_config().set(window=(3, 3), bias=False, param_partition_spec=(None, None, None, "model")),
+            Conv2D.default_config().set(
+                window=(3, 3),
+                bias=False,
+                param_partition_spec=(None, None, None, "model"),
+            ),
             "The convolution layer config.",
         )
         cfg.define(
@@ -71,7 +75,9 @@ class BasicBlock(BaseLayer):
         cfg.define(
             "conv",
             Conv2D.default_config().set(
-                window=(3, 3), bias=False, padding=((1, 1), (1, 1)),
+                window=(3, 3),
+                bias=False,
+                padding=((1, 1), (1, 1)),
                 param_partition_spec=(None, None, None, "model"),
             ),
             "The convolution layer config.",
@@ -234,7 +240,7 @@ class ResNetModel(BaseLayer):
                 input_dim=3,
                 output_dim=hidden_dim,
                 bias=False,
-                param_partition_spec=(None, None, None, "model")
+                param_partition_spec=(None, None, None, "model"),
             ),
         )
         self._add_child("norm1", cfg.norm.set(dim=hidden_dim))
@@ -252,8 +258,10 @@ class ResNetModel(BaseLayer):
         self._add_child(
             "fc",
             layers.Linear.default_config().set(
-                input_dim=hidden_dim, output_dim=cfg.num_classes, bias=True,
-                param_partition_spec=("model", None)
+                input_dim=hidden_dim,
+                output_dim=cfg.num_classes,
+                bias=True,
+                param_partition_spec=("model", None),
             ),
         )
 

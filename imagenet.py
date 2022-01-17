@@ -26,13 +26,19 @@ from image import ImagenetInput
 from trainer import SpmdTrainer, SpmdEvaler
 
 flags.DEFINE_string(
-    "dir", None,
+    "dir",
+    None,
     "The root directory of the trainer. "
     "Checkpoints will be stored in <dir>/checkpoints. "
     "Summaries will be stored in <dir>/summaries.",
-    required=True)
-flags.DEFINE_string("data_dir", None, "The tfds directory. If None, uses ~/tensorflow_datasets.")
-flags.DEFINE_list("mesh_shape", [8, 1], "The global device mesh shape for (data, model).")
+    required=True,
+)
+flags.DEFINE_string(
+    "data_dir", None, "The tfds directory. If None, uses ~/tensorflow_datasets."
+)
+flags.DEFINE_list(
+    "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
+)
 flags.DEFINE_integer("jax_profiler_port", 9999, "The profiler port.")
 
 FLAGS = flags.FLAGS
@@ -48,13 +54,16 @@ def imagenet_trainer_config():
     cfg.name = "imagenet_trainer"
     read_parallelism = 1
     cfg = ImagenetInput.default_config().set(
-        split="train", is_training=True, global_batch_size=train_batch_size,
+        split="train",
+        is_training=True,
+        global_batch_size=train_batch_size,
         data_dir=FLAGS.data_dir,
         read_parallelism=read_parallelism,
         decode_parallelism=128,
         process_parallelism=1024,
         prefetch_buffer_size=read_parallelism * 1024,
-        shuffle_buffer_size=read_parallelism * 1024)
+        shuffle_buffer_size=read_parallelism * 1024,
+    )
 
     cfg.model = resnet.ResNetModel.resnet18_config()
     cfg.summary_writer.write_every_n_steps = 100
@@ -75,16 +84,23 @@ def imagenet_trainer_config():
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     for evaler_cfg in cfg.evalers:
         evaler_cfg.run_every_n_steps = steps_per_epoch
-        evaler_cfg.input.set(is_training=False, global_batch_size=eval_batch_size, data_dir=FLAGS.data_dir)
+        evaler_cfg.input.set(
+            is_training=False,
+            global_batch_size=eval_batch_size,
+            data_dir=FLAGS.data_dir,
+        )
         evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
 
     learning_rate = config_lib.InstantiableConfig.for_function(schedule.stepwise).set(
-        sub=[0.1, 0.01, 0.001], start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
+        sub=[0.1, 0.01, 0.001],
+        start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
     )
 
     cfg.learner = learner.Learner.default_config().set(
         optimizer=config_lib.InstantiableConfig.for_function(learner.sgd_optimizer).set(
-            learning_rate=learning_rate, momentum=0.9, weight_decay=1e-4,
+            learning_rate=learning_rate,
+            momentum=0.9,
+            weight_decay=1e-4,
         ),
     )
     return cfg

@@ -12,7 +12,6 @@ STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 
 
 class ImagenetInput(TfdsInput):
-
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
@@ -31,5 +30,7 @@ class ImagenetInput(TfdsInput):
         image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
         if cfg.is_training:
             image = tf.image.random_flip_left_right(image)
-        image = tf.image.resize([image], cfg.image_size, method=tf.image.ResizeMethod.BICUBIC)[0]
+        image = tf.image.resize(
+            [image], cfg.image_size, method=tf.image.ResizeMethod.BICUBIC
+        )[0]
         return {"image": image, "label": example["label"]}

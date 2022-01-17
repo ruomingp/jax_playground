@@ -9,7 +9,6 @@ import utils
 
 
 class CheckpointerTest(absltest.TestCase):
-
     def assertNestedEqual(self, a, b):
         a_kv = utils.flatten_items(a)
         b_kv = utils.flatten_items(b)
@@ -22,8 +21,12 @@ class CheckpointerTest(absltest.TestCase):
     def testSaveAndRestore(self):
         cfg = Checkpointer.default_config().set(name="test", dir=tempfile.mkdtemp())
         ckpt: Checkpointer = cfg.instantiate(parent=None)
-        state0 = dict(x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32))
-        state1 = dict(x=jnp.ones([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32) + 1)
+        state0 = dict(
+            x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32)
+        )
+        state1 = dict(
+            x=jnp.ones([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32) + 1
+        )
 
         # Restoring from an empty dir returns the input state if step=None.
         self.assertNestedEqual(state0, ckpt.restore(step=None, state=state0))
@@ -47,20 +50,41 @@ class CheckpointerTest(absltest.TestCase):
 
         # When the given state has a different dict key: 'z' instead of 'y'.
         with self.assertRaisesRegex(KeyError, "z"):
-            ckpt.restore(step=None, state=dict(x=jnp.zeros([], dtype=jnp.int32), z=jnp.ones([2], dtype=jnp.float32)))
+            ckpt.restore(
+                step=None,
+                state=dict(
+                    x=jnp.zeros([], dtype=jnp.int32), z=jnp.ones([2], dtype=jnp.float32)
+                ),
+            )
 
         # When the given state has a different array shape: [3] instead of [2] for y.
         with self.assertRaisesRegex(ValueError, "checkpoint tree dtypes or shapes"):
-            ckpt.restore(step=None, state=dict(x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([3], dtype=jnp.float32)))
+            ckpt.restore(
+                step=None,
+                state=dict(
+                    x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([3], dtype=jnp.float32)
+                ),
+            )
 
         # When the given state has a different dict shape: [1] instead of [] for x.
         with self.assertRaisesRegex(ValueError, "checkpoint tree dtypes or shapes"):
-            ckpt.restore(step=None, state=dict(x=jnp.zeros([1], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32)))
+            ckpt.restore(
+                step=None,
+                state=dict(
+                    x=jnp.zeros([1], dtype=jnp.int32),
+                    y=jnp.ones([2], dtype=jnp.float32),
+                ),
+            )
 
         # When the given state has a different dtype: float32 instead of int32 for x.
         with self.assertRaisesRegex(ValueError, "checkpoint tree dtypes or shapes"):
-            ckpt.restore(step=None, state=dict(x=jnp.zeros([], dtype=jnp.float32), y=jnp.ones([2], dtype=jnp.float32)))
-
+            ckpt.restore(
+                step=None,
+                state=dict(
+                    x=jnp.zeros([], dtype=jnp.float32),
+                    y=jnp.ones([2], dtype=jnp.float32),
+                ),
+            )
 
 
 if __name__ == "__main__":
