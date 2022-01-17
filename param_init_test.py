@@ -26,7 +26,7 @@ class DefaultInitTest(absltest.TestCase):
         np.testing.assert_array_equal(scale, jnp.ones_like(scale))
 
     def testFan(self):
-        shape = (4, 8, 3, 3)
+        shape = (3, 3, 8, 4)  # H, W, I, O
         for dist in ("uniform", "normal"):
             for gain in (1.0, 2.0):
                 for fan_type in ("fan_in", "fan_out", "xavier"):
