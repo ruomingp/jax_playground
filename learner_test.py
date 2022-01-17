@@ -89,7 +89,7 @@ class LearnerTest(parameterized.TestCase):
             output_collection.keys(),
         )
         summaries = output_collection[OutputCollection.SECTION_SUMMARY]
-        self.assertEqual({"learning_rate": learning_rate(step)}, summaries)
+        self.assertEqual({"learning_rate": learning_rate(step), "lr_schedule_step": 0}, summaries)
         state_updates = output_collection[OutputCollection.SECTION_STATE_UPDATE]
         self.assertNestedEqual(
             {

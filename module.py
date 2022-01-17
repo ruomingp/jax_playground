@@ -130,6 +130,16 @@ class InvocationContext:
             output_collection=self.output_collection.add_child(name),
         )
 
+    def add_summary(self, name: str, value: jnp.ndarray):
+        return self.output_collection.add_value(
+            name, value, section=OutputCollection.SECTION_SUMMARY
+        )
+
+    def add_state_update(self, name: str, value: jnp.ndarray):
+        return self.output_collection.add_value(
+            name, value, section=OutputCollection.SECTION_STATE_UPDATE
+        )
+
     def get_summaries(self):
         return self.output_collection.get_values_recursively(
             OutputCollection.SECTION_SUMMARY
@@ -263,14 +273,10 @@ class Module(config_lib.Configurable):
         return self.get_invocation_context().state
 
     def add_summary(self, name: str, value: jnp.ndarray):
-        return self.get_invocation_context().output_collection.add_value(
-            name, value, section=OutputCollection.SECTION_SUMMARY
-        )
+        return self.get_invocation_context().add_summary(name, value)
 
     def add_state_update(self, name: str, value: jnp.ndarray):
-        return self.get_invocation_context().output_collection.add_value(
-            name, value, section=OutputCollection.SECTION_STATE_UPDATE
-        )
+        return self.get_invocation_context().add_state_update(name, value)
 
     def __call__(self, *args, method="forward", context=None, **kwargs) -> Any:
         if len(args) > 1:
