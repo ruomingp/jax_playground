@@ -1,5 +1,6 @@
 import numbers
 from typing import Any, Dict, Mapping, Sequence, Tuple, Union
+from absl import logging
 
 import jax
 import numpy
@@ -45,12 +46,16 @@ def tree_paths(tree: NestedTree, separator="/") -> NestedTree:
         return f"{prefix}{separator}{suffix}" if prefix else f"{suffix}"
 
     def visit(tree, prefix):
-        if isinstance(tree, Mapping):
-            return {k: visit(v, _concat(prefix, k)) for k, v in tree.items()}
+        if isinstance(tree, dict):
+            return type(tree)(
+                {k: visit(v, _concat(prefix, k)) for k, v in tree.items()}
+            )
         elif is_named_tuple(tree):
-            return visit(tree._asdict(), prefix)
-        elif isinstance(tree, Sequence):
-            return [visit(v, _concat(prefix, k)) for k, v in enumerate(tree)]
+            return type(tree)(**visit(tree._asdict(), prefix))
+        elif isinstance(tree, (list, tuple)):
+            return type(tree)(
+                [visit(v, _concat(prefix, k)) for k, v in enumerate(tree)]
+            )
         else:
             return prefix
 

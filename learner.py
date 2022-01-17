@@ -3,7 +3,8 @@ from typing import Callable, NamedTuple, Tuple, Union
 import optax
 
 import config as config_lib
-from module import Module, NestedTensor, NestedPartitionSpec
+import schedule
+from module import Module, NestedTensor, NestedPartitionSpec, Tensor
 
 
 def sgd_optimizer(
@@ -35,10 +36,13 @@ class Learner(Module):
         cfg.define("optimizer", None, "The optimizer config.")
         return cfg
 
-    def __init__(self, cfg: config.Config, *, parent: Module):
+    def __init__(self, cfg: config_lib.Config, *, parent: Module):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         self.optimizer: optax.GradientTransformation = cfg.optimizer.instantiate()
+        self.learning_rate: schedule.ScheduleFn = schedule.as_schedule_fn(
+            cfg.optimizer.learning_rate
+        )
 
     def create_state_partition_specs(
         self, model_param_partition_specs: NestedPartitionSpec
@@ -54,20 +58,19 @@ class Learner(Module):
         return LearnerState(optimizer=self.optimizer.init(model_params))
 
     def update(
-        self,
-        state: LearnerState,
-        *,
-        gradients: NestedTensor,
-        model_params: NestedTensor
-    ) -> Tuple[LearnerState, NestedTensor]:
+        self, *, step: Tensor, gradients: NestedTensor, model_params: NestedTensor
+    ) -> NestedTensor:
+        """Computes `model_params` updates with `gradients`."""
+        self.add_summary("learning_rate", self.learning_rate(step))
         parameter_updates, optimizer_state = self.optimizer.update(
-            gradients, state=state.optimizer, params=model_params
+            gradients, state=self.state.optimizer, params=model_params
         )
+        self.add_state_update("optimizer", optimizer_state)
         parameter_updates = self._adjust_updates(
             parameter_updates, gradients=gradients, model_params=model_params
         )
         updated_model_params = optax.apply_updates(model_params, parameter_updates)
-        return LearnerState(optimizer=optimizer_state), updated_model_params
+        return updated_model_params
 
     def _adjust_updates(
         self,

@@ -6,12 +6,27 @@ from absl.testing import absltest
 from jax import numpy as jnp
 
 from utils import as_tensor, flatten_items, tree_paths
+from typing import Any, NamedTuple
+
+
+class Combo(NamedTuple):
+    head: Any
+    tail: Any
 
 
 class TreeUtilsTest(absltest.TestCase):
     def testTreePaths(self):
         tree = {"a": 1, "b": [2, {"c": 3}]}
         self.assertEqual({"a": "a", "b": ["b/0", {"c": "b/1/c"}]}, tree_paths(tree))
+
+        # Tuple.
+        self.assertEqual(("0", ("1/0", "1/1"), "2"), tree_paths(("a", ("b", "c"), "d")))
+
+        # NamedTuple.
+        self.assertEqual(
+            Combo(head="head", tail=Combo(head="tail/head", tail="tail/tail")),
+            tree_paths(Combo(head=1, tail=Combo(head=2, tail=None))),
+        )
 
     def testFlattenItems(self):
         tree = {"a": 1, "b": [2, {"c": 3, "d": 4}]}

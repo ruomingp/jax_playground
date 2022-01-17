@@ -258,14 +258,17 @@ class SpmdTrainer(_SpmdRunner):
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
-        (updated_learner_state, updated_model_params), learner_output_collection = F(
+        updated_model_params, learner_output_collection = F(
             self.learner,
             method="update",
-            state=None,
+            state=state.learner,
             is_training=True,
             prng_key=learner_key,
-            inputs=dict(state=state.learner, model_params=state.model, gradients=grads),
-            output_collection_sections=[OutputCollection.SECTION_SUMMARY],
+            inputs=dict(step=state.step, model_params=state.model, gradients=grads),
+            output_collection_sections=[
+                OutputCollection.SECTION_STATE_UPDATE,
+                OutputCollection.SECTION_SUMMARY,
+            ],
         )
         updated_state = _TrainerState(
             step=state.step + 1,
@@ -273,7 +276,9 @@ class SpmdTrainer(_SpmdRunner):
                 updated_model_params,
                 forward_output_collection[OutputCollection.SECTION_STATE_UPDATE],
             ),
-            learner=updated_learner_state,
+            learner=learner.LearnerState(
+                **learner_output_collection[OutputCollection.SECTION_STATE_UPDATE]
+            ),
         )
         # TODO(ruoming): only retrieve summaries when necessary.
         summaries = dict(
