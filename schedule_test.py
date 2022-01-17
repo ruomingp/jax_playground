@@ -3,12 +3,8 @@ import math
 from absl import logging
 from absl.testing import absltest
 
-from config import InstantiableConfig
 import schedule
 from schedule import as_schedule_fn
-
-
-config_for_function = InstantiableConfig.for_function
 
 
 class ScheduleTest(absltest.TestCase):

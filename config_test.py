@@ -202,7 +202,7 @@ class ConfigTest(absltest.TestCase):
             def named_parameters(self):
                 return self.params.items()
 
-        cfg = config.InstantiableConfig.for_class(Layer)
+        cfg = config.config_for_class(Layer)
         self.assertContainsSubset(
             {"cls", "in_features", "out_features", "bias"}, cfg.keys()
         )
@@ -222,8 +222,8 @@ class ConfigTest(absltest.TestCase):
         self.assertEqual(param_shapes(layer1), param_shapes(layer2))
 
     def testInstantiableConfigFromFunctionSignature(self):
-        cfg = config.InstantiableConfig.for_function(tfds.load)
-        self.assertContainsSubset({"cls", "name", "split", "download"}, cfg.keys())
+        cfg = config.config_for_function(tfds.load)
+        self.assertContainsSubset({"fn", "name", "split", "download"}, cfg.keys())
 
 
 if __name__ == "__main__":

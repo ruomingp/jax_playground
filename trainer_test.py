@@ -78,7 +78,7 @@ class TrainerTest(parameterized.TestCase):
         )
         cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
-            optimizer=config_lib.InstantiableConfig.for_function(optax.sgd).set(
+            optimizer=config_lib.config_for_function(optax.sgd).set(
                 learning_rate=0.1, momentum=0.9
             )
         )

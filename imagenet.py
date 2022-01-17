@@ -91,13 +91,13 @@ def imagenet_trainer_config():
         )
         evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
 
-    learning_rate = config_lib.InstantiableConfig.for_function(schedule.stepwise).set(
+    learning_rate = config_lib.config_for_function(schedule.stepwise).set(
         sub=[0.1, 0.01, 0.001],
         start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
     )
 
     cfg.learner = learner.Learner.default_config().set(
-        optimizer=config_lib.InstantiableConfig.for_function(learner.sgd_optimizer).set(
+        optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
             learning_rate=learning_rate,
             momentum=0.9,
             weight_decay=1e-4,

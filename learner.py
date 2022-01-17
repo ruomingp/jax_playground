@@ -9,17 +9,16 @@ from module import Module, NestedTensor, NestedPartitionSpec, Tensor
 
 def sgd_optimizer(
     learning_rate: Union[float, Callable[[int], float], config_lib.InstantiableConfig],
-    momentum: float,
-    weight_decay: float,
+    momentum: float = 0,
+    weight_decay: float = 0,
 ) -> optax.GradientTransformation:
-    if isinstance(learning_rate, config_lib.InstantiableConfig):
-        learning_rate = learning_rate.instantiate()
+    def scale(step):
+        return -schedule.as_schedule_fn(learning_rate)(step)
+
     return optax.chain(
-        optax.sgd(
-            learning_rate=learning_rate,
-            momentum=momentum,
-        ),
+        optax.trace(decay=momentum),
         optax.add_decayed_weights(weight_decay),
+        optax.scale_by_schedule(scale),
     )
 
 
@@ -48,7 +47,7 @@ class Learner(Module):
         self, model_param_partition_specs: NestedPartitionSpec
     ):
         cfg = self.config
-        if cfg.optimizer.cls == optax.sgd:
+        if cfg.optimizer.fn == optax.sgd:
             return LearnerState(
                 optimizer=(optax.TraceState(trace=model_param_partition_specs), None)
             )

@@ -26,9 +26,9 @@ Example usage for configuring a module:
         cfg.set(input_dim=512, output_dim=256)
         return cfg.instantiate()
 
-Config can also be used for third-party classes with InstantiableConfig.for_class(), for example:
+Config can also be used for third-party classes with config_for_class(), for example:
 
-    cfg.define('input_projection', InstantiableConfig.for_class(nn.Linear),
+    cfg.define('input_projection', config_for_class(nn.Linear),
                'The linear layer for input projection')
 """
 
@@ -300,26 +300,6 @@ class InstantiableConfig(Config):
         super().__init__()
         self.define("cls", cls, "Cls that this Config object is associated with.")
 
-    @staticmethod
-    def for_class(cls):
-        config = InstantiableConfig(cls)
-        init_sig = inspect.signature(cls.__init__)
-        for name, param in init_sig.parameters.items():
-            if name == "self":
-                continue
-            config.define(
-                name, param.default, f"The argument {name} for {cls}.__init__()."
-            )
-        return config
-
-    @staticmethod
-    def for_function(fn):
-        config = InstantiableConfig(cls=fn)
-        init_sig = inspect.signature(fn)
-        for name, param in init_sig.parameters.items():
-            config.define(name, param.default, f"The argument {name} for {fn}().")
-        return config
-
     def instantiate(self, **kwargs) -> Any:
         """Instantiate an instance that this Config is configured for.
 
@@ -381,3 +361,30 @@ class Configurable:
 
     def __repr__(self):
         return repr(self._config)
+
+
+def config_for_class(cls):
+    config = InstantiableConfig(cls)
+    init_sig = inspect.signature(cls.__init__)
+    for name, param in init_sig.parameters.items():
+        if name == "self":
+            continue
+        config.define(name, param.default, f"The argument {name} for {cls}.__init__().")
+    return config
+
+
+class FunctionConfig(Config):
+    def __init__(self, fn: Optional[Callable] = None) -> None:
+        super().__init__()
+        self.define("fn", fn, "The function that this Config object configures.")
+
+    def instantiate(self, **kwargs) -> Any:
+        return self.fn(**{k: v for k, v in self.items() if k != "fn"}, **kwargs)
+
+
+def config_for_function(fn):
+    config = FunctionConfig(fn=fn)
+    init_sig = inspect.signature(fn)
+    for name, param in init_sig.parameters.items():
+        config.define(name, param.default, f"The argument {name} for {fn}().")
+    return config
