@@ -187,6 +187,8 @@ class LayerTest(parameterized.TestCase):
                 self.assertCountEqual(
                     ["moving_mean", "moving_variance"], param_updates.keys()
                 )
+                self.assertEqual((dim,), param_updates["moving_mean"].shape)
+                self.assertEqual((dim,), param_updates["moving_variance"].shape)
                 self.assertNotAlmostEqual(
                     jnp.abs(
                         param_updates["moving_mean"] - layer_params["moving_mean"]
