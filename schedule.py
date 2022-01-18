@@ -1,11 +1,14 @@
 import math
-import numbers
 from typing import Callable, Sequence, Union
+
+import jax
+from jax import numpy as jnp
+from utils import Tensor
 
 import config as config_lib
 
-ScheduleFn = Callable[[int], float]
-Schedule = Union[float, ScheduleFn, config_lib.InstantiableConfig]
+ScheduleFn = Callable[[Tensor], Tensor]
+Schedule = Union[float, Tensor, ScheduleFn, config_lib.InstantiableConfig]
 
 
 def as_schedule_fn(s: Schedule) -> ScheduleFn:
@@ -18,12 +21,12 @@ def as_schedule_fn(s: Schedule) -> ScheduleFn:
 
 
 def polynomial(
-    *,
-    begin_step: int = 0,
-    begin_value: float = 0,
-    end_step: int = 1,
-    end_value: float = 0,
-    power: float = 1,
+        *,
+        begin_step: int = 0,
+        begin_value: float = 0,
+        end_step: int = 1,
+        end_value: float = 0,
+        power: float = 1,
 ) -> ScheduleFn:
     """A polynomial (linear when power=1) schedule.
 
@@ -40,20 +43,20 @@ def polynomial(
     if begin_step >= end_step:
         raise ValueError(f"begin_step {begin_step} must be < end_step {end_step}.")
 
-    def fn(step: int) -> float:
+    def fn(step: Tensor) -> Tensor:
         frac = (step - begin_step) / (end_step - begin_step)
-        frac = min(1.0, max(0.0, frac))
+        frac = jnp.minimum(1.0, jnp.maximum(0.0, frac))
         return begin_value + (frac ** power) * (end_value - begin_value)
 
     return fn
 
 
 def exponential(
-    *,
-    begin_step: int = 0,
-    begin_value: float = 0,
-    end_step: int = 1,
-    end_value: float = 0,
+        *,
+        begin_step: int = 0,
+        begin_value: float = 0,
+        end_step: int = 1,
+        end_value: float = 0,
 ) -> ScheduleFn:
     """An exponential schedule.
 
@@ -80,14 +83,14 @@ def exponential(
         end_value=math.log(end_value),
     )
 
-    def fn(step: int) -> float:
+    def fn(step: Tensor) -> Tensor:
         return math.exp(log_fn(step))
 
     return fn
 
 
 def inverse_sqrt(step: int) -> float:
-    return max(1, step) ** -0.5
+    return jnp.maximum(1, step) ** -0.5
 
 
 def stepwise(sub: Sequence[Schedule], start_step: Sequence[int]) -> ScheduleFn:
@@ -108,16 +111,19 @@ def stepwise(sub: Sequence[Schedule], start_step: Sequence[int]) -> ScheduleFn:
     """
     if len(sub) != len(start_step) + 1:
         raise ValueError(f"Unexpected length: {len(sub)} != {len(start_step)} + 1")
+    if not all(step >= 0 for step in start_step):
+        raise ValueError(f"start_step must be >= 0: {start_step}")
     sub = [as_schedule_fn(s) for s in sub]
+    all_start_steps = [0] + start_step
+    all_limit_steps = start_step + [-1]
 
-    def fn(step: int):
-        index = 0
-        start = 0
-        while index < len(start_step):
-            if step < start_step[index]:
-                break
-            start = start_step[index]
-            index += 1
-        return sub[index](step - start)
+    def fn(step: Tensor) -> Tensor:
+        values = [s(jnp.maximum(0, step - start)) for s, start in zip(sub, all_start_steps)]
+        activations = [
+            jnp.logical_and(jax.lax.le(start, step),
+                            jnp.logical_or(limit < 0, jax.lax.lt(step, limit)),
+                            ).astype(jnp.float32)
+            for start, limit in zip(all_start_steps, all_limit_steps)]
+        return sum([value * activation for value, activation in zip(values, activations)])
 
     return fn

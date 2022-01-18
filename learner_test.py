@@ -3,7 +3,9 @@ import numpy as np
 import optax
 from absl.testing import absltest, parameterized
 from jax import numpy as jnp
+from functools import partial
 
+import schedule
 import utils
 from config import config_for_function
 from learner import Learner, LearnerState, sgd_optimizer
@@ -44,7 +46,11 @@ class LearnerTest(parameterized.TestCase):
         np.testing.assert_allclose(updated_params, params + updates, atol=1e-6)
 
     def testLearner(self):
-        learning_rate = lambda step: 0.1 - 1e-4 * step
+        learning_rate = config_for_function(schedule.stepwise).set(
+            sub=[0.1, 0.01, 0.001],
+            start_step=[100, 200],
+        )
+        learning_rate_fn = schedule.as_schedule_fn(learning_rate)
         weight_decay = 1e-4
         step = 0
         optimizer_cfg = config_for_function(sgd_optimizer).set(
@@ -52,8 +58,8 @@ class LearnerTest(parameterized.TestCase):
         )
         learner: Learner = (
             Learner.default_config()
-            .set(name="test", optimizer=optimizer_cfg)
-            .instantiate(parent=None)
+                .set(name="test", optimizer=optimizer_cfg)
+                .instantiate(parent=None)
         )
 
         params = jnp.asarray([0, 1, 2, -3], dtype=jnp.float32)
@@ -68,21 +74,20 @@ class LearnerTest(parameterized.TestCase):
             grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6
         )
 
-        updated_params, output_collection = F(
-            learner,
-            method="update",
-            is_training=True,
-            prng_key=jax.random.PRNGKey(123),
-            state=state,
-            inputs=dict(step=step, gradients=grads, model_params=params),
+        updated_params, output_collection = jax.jit(partial(
+            F, learner, method="update", is_training=True,
             output_collection_sections=[
                 OutputCollection.SECTION_STATE_UPDATE,
                 OutputCollection.SECTION_SUMMARY,
             ],
+        ))(
+            prng_key=jax.random.PRNGKey(123),
+            state=state,
+            inputs=dict(step=step, gradients=grads, model_params=params),
         )
         np.testing.assert_allclose(
             updated_params,
-            params - learning_rate(step) * (grads + weight_decay * params),
+            params - learning_rate_fn(step) * (grads + weight_decay * params),
             atol=1e-6,
         )
         self.assertCountEqual(
@@ -91,7 +96,7 @@ class LearnerTest(parameterized.TestCase):
         )
         summaries = output_collection[OutputCollection.SECTION_SUMMARY]
         self.assertEqual(
-            {"learning_rate": learning_rate(step), "lr_schedule_step": 0}, summaries
+            {"learning_rate": learning_rate_fn(step), "lr_schedule_step": 0}, summaries
         )
         state_updates = output_collection[OutputCollection.SECTION_STATE_UPDATE]
         self.assertNestedEqual(

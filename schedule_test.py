@@ -1,7 +1,9 @@
 import math
 
+import jax
 from absl import logging
 from absl.testing import absltest
+import numpy as np
 
 import schedule
 from schedule import as_schedule_fn
@@ -31,7 +33,7 @@ class ScheduleTest(absltest.TestCase):
         )
         for step in range(10):
             value = s(step)
-            self.assertEqual(math.sqrt(step / 100) * 10, value)
+            np.testing.assert_allclose(math.sqrt(step / 100) * 10, value, atol=1e-6)
 
     def testExponential(self):
         s = schedule.exponential(
@@ -48,14 +50,27 @@ class ScheduleTest(absltest.TestCase):
             value = s(step)
             self.assertAlmostEqual(1 / math.sqrt(step), value)
 
+    def testStepwise(self):
+        s = jax.jit(schedule.stepwise(
+            start_step=[100, 200],
+            sub=[0.1, 0.01, 0.001]))
+        for step in range(0, 300, 50):
+            value = s(step)
+            if step < 100:
+                self.assertEqual(0.1, value)
+            elif step < 200:
+                self.assertEqual(0.01, value)
+            else:
+                self.assertEqual(0.001, value)
+
     def testT5(self):
-        s = schedule.stepwise(
+        s = jax.jit(schedule.stepwise(
             start_step=[100],
             sub=[
                 schedule.polynomial(end_step=100, end_value=0.1),
                 lambda step: schedule.inverse_sqrt(step + 100),
             ],
-        )
+        ))
         for step in range(200):
             value = s(step)
             logging.info("step=%s value=%s", step, value)
