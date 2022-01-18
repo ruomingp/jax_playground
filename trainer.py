@@ -134,7 +134,7 @@ class SpmdTrainer(_SpmdRunner):
 
     @property
     def step(self):
-        return self._state.step.item()
+        return self._state.step
 
     def run(self, prng_key: jax.random.KeyArray, max_step: int):
         cfg = self.config
@@ -208,7 +208,7 @@ class SpmdTrainer(_SpmdRunner):
             jax.process_index(),
             self.step,
             outputs["loss"],
-            jax.tree_map(lambda x: x.item(), outputs["aux"]),
+            jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
         )
         self.summary_writer(
             self.step, {"loss": outputs["loss"], **outputs["summaries"]}
