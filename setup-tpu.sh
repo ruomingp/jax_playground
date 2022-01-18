@@ -1,4 +1,4 @@
-# git clone https://github.com/ruomingp/jax_playground.git && sh jax_playground/setup-tpu.sh
+# git clone git@github.com:ruomingp/jax_playground.git && sh jax_playground/setup-tpu.sh
 sudo pip install -r jax_playground/requirements-tpu.txt
 git clone https://github.com/google/jax
 cd jax/
