@@ -38,6 +38,7 @@ flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
 )
 flags.DEFINE_integer("jax_profiler_port", 9999, "The profiler port.")
+flags.DEFINE_bool("debug", False, "If true, run in the debug mode.")
 
 FLAGS = flags.FLAGS
 
@@ -59,29 +60,29 @@ def imagenet_trainer_config():
         read_parallelism=read_parallelism,
         decode_parallelism=128,
         process_parallelism=1024,
-        prefetch_buffer_size=read_parallelism * 1024,
+        prefetch_buffer_size=64 * 1024,
         shuffle_buffer_size=read_parallelism * 1024,
     )
 
     cfg.model = resnet.ResNetModel.resnet18_config()
     cfg.summary_writer.write_every_n_steps = 100
     cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
-    cfg.checkpointer.write_every_n_steps = steps_per_epoch
+    cfg.checkpointer.write_every_n_steps = 10 if FLAGS.debug else steps_per_epoch
     cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
     evaler_train = SpmdEvaler.default_config().set(
         name="eval_train",
-        input=ImagenetInput.default_config().set(split="train[0:50000]"),
+        input=ImagenetInput.default_config().set(split="train[:160]" if FLAGS.debug else "train[0:50000]"),
     )
     evaler_validation = SpmdEvaler.default_config().set(
         name="eval_validation",
-        input=ImagenetInput.default_config().set(split="validation"),
+        input=ImagenetInput.default_config().set(split="validation[:160]" if FLAGS.debug else "validation"),
     )
     cfg.evalers = (evaler_train, evaler_validation)
 
     summary_dir = os.path.join(FLAGS.dir, "summaries")
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     for evaler_cfg in cfg.evalers:
-        evaler_cfg.run_every_n_steps = steps_per_epoch
+        evaler_cfg.run_every_n_steps = 10 if FLAGS.debug else steps_per_epoch
         evaler_cfg.input.set(
             is_training=False,
             global_batch_size=eval_batch_size,

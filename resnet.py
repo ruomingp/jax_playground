@@ -296,8 +296,6 @@ class ResNetModel(BaseLayer):
         predictions = jnp.argmax(logits, axis=-1)
         num_examples = float(label.shape[0])
         accuracy = jnp.equal(predictions, label).sum() / num_examples
-        return loss, dict(
-            accuracy=WeightedScalar(accuracy, num_examples),
-            loss=WeightedScalar(loss, num_examples),
-            logits=logits,
-        )
+        self.add_summary("loss", WeightedScalar(loss, num_examples))
+        self.add_summary("accuracy", WeightedScalar(accuracy, num_examples))
+        return loss, dict(logits=logits)

@@ -6,6 +6,7 @@ from jax import numpy as jnp
 from tensorflow import summary as tf_summary
 
 import config as config_lib
+from metrics import WeightedScalar
 from module import Module
 from utils import tree_paths
 
@@ -37,10 +38,12 @@ class SummaryWriter(Module):
 
             def write(path: str, value: jnp.ndarray):
                 logging.info("SummaryWriter %s: %s=%s", self.path(), path, value)
-                if value.ndim == 0:
+                if isinstance(value, WeightedScalar):
+                    tf_summary.scalar(path, value.mean, step=step)
+                elif value.ndim == 0:
                     tf_summary.scalar(path, value, step=step)
                 else:
                     tf_summary.histogram(path, value, step=step)
 
-            jax.tree_map(write, tree_paths(values, separator="/"), values)
+            jax.tree_map(write, tree_paths(values, separator="/"), values, is_leaf=lambda x: isinstance(x, WeightedScalar))
         self.summary_writer.flush()

@@ -15,7 +15,7 @@ import learner
 import metrics
 import module
 import summary_writer
-from module import functional as F, Module, NestedTensor, OutputCollection
+from module import functional as F, Module, NestedTensor, NestedPartitionSpec, OutputCollection
 from utils import Tensor, as_tensor, tree_paths, flatten_items
 
 
@@ -203,20 +203,21 @@ class SpmdTrainer(_SpmdRunner):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(train_key, self._state, input_batch)
             self._state = outputs["state"]
-        logging.info(
-            "Process % 3d step % 8d: loss=%s aux=%s",
-            jax.process_index(),
-            self.step,
-            outputs["loss"],
-            jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
-        )
+        if self._state.step % 100 == 0:
+            logging.info(
+                "Process % 3d step % 8d: loss=%s aux=%s",
+                jax.process_index(),
+                self.step,
+                outputs["loss"],
+                jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
+            )
         self.summary_writer(
             self.step, {"loss": outputs["loss"], **outputs["summaries"]}
         )
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
-                self.step, eval_key, model=self.model, model_params=self._state.model
+                self.step, eval_key, model=self.model, model_params=self._state.model, model_param_partition_spec=self._trainer_state_partition_specs.model
             )
         self.checkpointer.save(step=self.step, state=self._state)
 
@@ -301,6 +302,7 @@ class SpmdEvaler(_SpmdRunner):
         *,
         model: Module,
         model_params: NestedTensor,
+        model_param_partition_spec: NestedPartitionSpec,
     ):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
@@ -314,7 +316,7 @@ class SpmdEvaler(_SpmdRunner):
             ),
             in_axis_resources=(
                 None,  # prng_key
-                self._parameter_sharding(),
+                model_param_partition_spec,
                 self._input_sharding(),
             ),
             out_axis_resources=None,
@@ -327,20 +329,16 @@ class SpmdEvaler(_SpmdRunner):
             (_, aux), output_collection = _jit_eval_batch(
                 batch_key, model_params, input_batch
             )
-            if num_batches == 0:
-                self.summary_writer(
-                    step, output_collection[OutputCollection.SECTION_SUMMARY]
-                )
             num_batches += 1
-            logging.info(
-                "Process % 3d step % 8d batch % 8d: %s.metrics=%s",
+            logging.debug(
+                "Process % 3d step % 8d batch % 8d: %s.aux=%s",
                 jax.process_index(),
                 step,
                 num_batches,
                 self.path(),
-                jax.tree_map(lambda x: x.item(), aux),
+                jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", aux),
             )
-            metric_accumulator.update(aux)
+            metric_accumulator.update(output_collection[OutputCollection.SECTION_SUMMARY])
         summaries = metric_accumulator.summaries()
         logging.info(
             "Process % 3d step % 8d: %s.metrics=%s",
