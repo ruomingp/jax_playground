@@ -9,7 +9,7 @@ Schedule = Union[float, ScheduleFn, config_lib.InstantiableConfig]
 
 
 def as_schedule_fn(s: Schedule) -> ScheduleFn:
-    if isinstance(s, config_lib.InstantiableConfig):
+    if isinstance(s, (config_lib.InstantiableConfig, config_lib.FunctionConfig)):
         return s.instantiate()
     if isinstance(s, float):
         return lambda step: float(s)

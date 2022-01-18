@@ -1,6 +1,6 @@
 """
 On the TPU VM:
-dir=gs://permanent-us-central1-q5loch/${USER}/experiments/imagenet-$(date +%F)b
+dir=gs://permanent-us-central1-q5loch/${USER}/experiments/imagenet-$(date +%F)a
 echo $dir
 python3 imagenet.py --dir=$dir --data_dir=gs://permanent-us-central1-q5loch/tensorflow_datasets 2>&1 | tee /tmp/log
 
@@ -51,7 +51,7 @@ def imagenet_trainer_config():
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
     read_parallelism = 1
-    cfg = ImagenetInput.default_config().set(
+    cfg.input = ImagenetInput.default_config().set(
         split="train",
         is_training=True,
         global_batch_size=train_batch_size,

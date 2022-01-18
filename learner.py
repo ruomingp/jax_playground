@@ -39,6 +39,16 @@ def copy_partition(
     )
 
 
+def trace_partition(
+    base: optax.GradientTransformation,
+) -> PartitionedGradientTransformation:
+    return PartitionedGradientTransformation(
+        init=base.init,
+        update=base.update,
+        partition=lambda partition_spec: optax.TraceState(trace=partition_spec),
+    )
+
+
 def replicate(base: optax.GradientTransformation) -> PartitionedGradientTransformation:
     return PartitionedGradientTransformation(
         init=base.init, update=base.update, partition=lambda partition_spec: None
@@ -65,7 +75,7 @@ def sgd_optimizer(
     weight_decay: float = 0,
 ) -> PartitionedGradientTransformation:
     return chain(
-        copy_partition(optax.trace(decay=momentum)),
+        trace_partition(optax.trace(decay=momentum)),
         replicate(optax.add_decayed_weights(weight_decay)),
         replicate(optax.scale_by_schedule(scale_from_learning_rate(learning_rate))),
     )
