@@ -38,7 +38,6 @@ class Checkpointer(Module):
             keep=cfg.keep_last_n,
             keep_every_n_steps=cfg.keep_every_n_steps,
         )
-        # TODO(ruoming): add synchronization across processes.
 
     def restore(
         self, *, step: Optional[int] = None, state: Optional[NestedTensor] = None

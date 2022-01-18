@@ -68,17 +68,6 @@ class _SpmdRunner(Module):
         logging.debug("Compiling computation done")
         return fn
 
-    def _parameter_sharding(self):
-        # TODO(ruoming): support state sharding.
-        return None
-
-    def _state_sharding(self):
-        return _TrainerState(
-            step=None,
-            model=self._parameter_sharding(),
-            learner=self._parameter_sharding(),
-        )
-
     def _input_sharding(self):
         # Shard data along the batch dim.
         return PartitionSpec("data")

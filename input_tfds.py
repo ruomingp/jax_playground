@@ -59,7 +59,6 @@ class TfdsInput(Module):
         cfg = self.config
         if cfg.is_training is None:
             raise ValueError(f"{self.path()}: is_training must be specified explicitly")
-        # TODO(ruoming): tune according to https://www.tensorflow.org/datasets/performances.
         builder = tfds.builder(cfg.dataset_name, data_dir=cfg.data_dir)
         if cfg.download:
             logging.info("Downloading %s", cfg.dataset_name)

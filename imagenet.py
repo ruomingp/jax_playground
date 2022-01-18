@@ -10,10 +10,8 @@ gcloud auth application-default login
 tensorboard --logdir=$dir/summaries
 """
 import os.path
-from functools import partial
 
 import jax
-import optax
 from absl import app, flags, logging
 from jax.experimental import maps
 from jax.experimental import mesh_utils

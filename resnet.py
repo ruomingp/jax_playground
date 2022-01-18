@@ -16,7 +16,7 @@ Tensor = jnp.ndarray
 
 
 def batch_norm():
-    return BatchNorm.default_config().set(decay=0.9)
+    return BatchNorm.default_config().set(decay=0.9, eps=1e-5)
 
 
 class Downsample(BaseLayer):
@@ -245,16 +245,17 @@ class ResNetModel(BaseLayer):
         )
         self._add_child("norm1", cfg.norm.set(dim=hidden_dim))
         for stage_i, num_blocks in enumerate(cfg.num_blocks_per_stage):
+            output_dim = hidden_dim if stage_i == 0 else hidden_dim * 2
             self._add_child(
                 f"stage{stage_i}",
                 cfg.stage.set(
                     input_dim=hidden_dim,
-                    output_dim=hidden_dim * 2,
+                    output_dim=output_dim,
                     stride=1 if stage_i == 0 else 2,
                     num_blocks=num_blocks,
                 ),
             )
-            hidden_dim *= 2
+            hidden_dim = output_dim
         self._add_child(
             "fc",
             layers.Linear.default_config().set(
@@ -298,4 +299,5 @@ class ResNetModel(BaseLayer):
         return loss, dict(
             accuracy=WeightedScalar(accuracy, num_examples),
             loss=WeightedScalar(loss, num_examples),
+            logits=logits,
         )

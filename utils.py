@@ -97,6 +97,8 @@ def as_tensor(x):
         return x
     if isinstance(x, (numbers.Number, numpy.ndarray)):
         return jnp.asarray(x)
+    if hasattr(x, "detach"):
+        x = x.detach()
     if hasattr(x, "numpy"):
         return jnp.asarray(x.numpy())
     if isinstance(x, (Mapping, Sequence)):
