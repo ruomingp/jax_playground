@@ -78,8 +78,8 @@ class TrainerTest(parameterized.TestCase):
         )
         cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
-            optimizer=config_lib.config_for_function(optax.sgd).set(
-                learning_rate=0.1, momentum=0.9
+            optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
+                learning_rate=0.1, momentum=0.9, weight_decay=1e-4,
             )
         )
         evaler_cfg = SpmdEvaler.default_config().set(

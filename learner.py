@@ -98,6 +98,8 @@ class Learner(Module):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         self.optimizer: PartitionedGradientTransformation = cfg.optimizer.instantiate()
+        if not isinstance(self.optimizer, PartitionedGradientTransformation):
+            raise ValueError(f"optimizer must be a PartitionedGradientTransformation: {cfg.optimizer}")
 
     def create_state_partition_specs(
         self, model_param_partition_specs: NestedPartitionSpec

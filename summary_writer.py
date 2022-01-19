@@ -1,3 +1,4 @@
+import numbers
 from typing import Any, Dict, Optional
 
 import jax
@@ -35,15 +36,17 @@ class SummaryWriter(Module):
         if step % cfg.write_every_n_steps != 0:
             return
         with self.summary_writer.as_default(step=step):
+            values = jax.tree_map(lambda v: v.mean if isinstance(v, WeightedScalar) else v, values,
+                                  is_leaf=lambda x: isinstance(x, WeightedScalar))
 
             def write(path: str, value: jnp.ndarray):
                 logging.info("SummaryWriter %s: %s=%s", self.path(), path, value)
                 if isinstance(value, WeightedScalar):
                     tf_summary.scalar(path, value.mean, step=step)
-                elif value.ndim == 0:
+                elif isinstance(value, numbers.Number) or value.ndim == 0:
                     tf_summary.scalar(path, value, step=step)
                 else:
                     tf_summary.histogram(path, value, step=step)
 
-            jax.tree_map(write, tree_paths(values, separator="/"), values, is_leaf=lambda x: isinstance(x, WeightedScalar))
-        self.summary_writer.flush()
+            jax.tree_map(write, tree_paths(values, separator="/"), values)
+            self.summary_writer.flush()

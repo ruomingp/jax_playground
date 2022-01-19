@@ -2,7 +2,7 @@
 On the TPU VM:
 dir=gs://permanent-us-central1-q5loch/${USER}/experiments/imagenet-$(date +%F)a
 echo $dir
-python3 imagenet.py --dir=$dir --data_dir=gs://permanent-us-central1-q5loch/tensorflow_datasets 2>&1 | tee /tmp/log
+python3 imagenet.py --dir=$dir 2>&1 | tee /tmp/log
 
 On your local machine:
 pip install tensorflow tbp-nightly
@@ -56,7 +56,7 @@ def imagenet_trainer_config():
         split="train",
         is_training=True,
         global_batch_size=train_batch_size,
-        data_dir=FLAGS.data_dir,
+        data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
         read_parallelism=read_parallelism,
         decode_parallelism=128,
         process_parallelism=1024,

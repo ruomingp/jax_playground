@@ -177,15 +177,6 @@ def set_current_context(context: InvocationContext):
 
 
 @contextlib.contextmanager
-def root_context(context: InvocationContext):
-    global _global_context_stack
-    if _global_context_stack.stack:
-        raise ValueError("Already within a InvocationContext")
-    with set_current_context(context) as c:
-        yield c
-
-
-@contextlib.contextmanager
 def child_context(name: str, **kwargs):
     context = current_context().add_child(name, **kwargs)
     with set_current_context(context) as c:
@@ -345,7 +336,7 @@ def functional(
         prng_key=prng_key,
     )
 
-    with root_context(context):
+    with set_current_context(context):
         if isinstance(inputs, dict):
             input_args, input_kwargs = [], inputs
         else:
