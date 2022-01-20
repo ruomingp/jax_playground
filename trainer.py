@@ -183,16 +183,7 @@ class SpmdTrainer(_SpmdRunner):
             )
 
         # Try to restore the latest checkpoint.
-        try:
-            self._state = self.checkpointer.restore(step=None, state=self._state)
-        except Exception as e:
-            logging.info(
-                f"Failed to restore checkpoint. This is expected when we start training a model: {e}"
-            )
-        finally:
-            # Save the initial ckpt for debugging.
-            # self.checkpointer.save(step=self.step, state=self._state)
-            pass
+        self._state = self.checkpointer.restore(step=None, state=self._state)
 
     def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
@@ -332,7 +323,7 @@ class SpmdEvaler(_SpmdRunner):
             )
             metric_accumulator.update(output_collection.summaries)
         summaries = metric_accumulator.summaries()
-        logging.info(
+        logging.vlog(2,
             "Process % 3d step % 8d: %s.metrics=%s",
             jax.process_index(),
             step,
