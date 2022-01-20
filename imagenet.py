@@ -117,7 +117,7 @@ def run_trainer(trainer_config, mesh_shape):
     devices = mesh_utils.create_device_mesh(mesh_shape)
     mesh = maps.Mesh(devices, ("data", "model"))
     with maps.mesh(mesh.devices, mesh.axis_names):
-        trainer.run(prng_key, max_step=100 if FLAGS.debug else 1000000)
+        trainer.run(prng_key, max_step=100 if FLAGS.debug else 12000)
 
 
 def main(argv):
