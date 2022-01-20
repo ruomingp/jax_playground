@@ -13,8 +13,6 @@ from module import (
     NestedParameterSpec,
     OutputCollection,
     ParameterSpec,
-)
-from module import (
     new_output_collection,
     current_context,
     set_current_context,
@@ -33,10 +31,18 @@ class OutputCollectionTest(absltest.TestCase):
         self.assertEqual({"x": 1, "c1": {"y": 2}, "c2": {"z": 3}}, c.summaries)
 
 
+class TestModule(Module):
+    pass
+
+
+def new_test_module(name: str) -> TestModule:
+    return TestModule.default_config().set(name=name).instantiate(parent=None)
+
+
 class InvocationContextTest(absltest.TestCase):
     def testContextOutputCollection(self):
         context = InvocationContext(
-            module=None,
+            module=new_test_module("test"),
             is_training=True,
             prng_key=jax.random.PRNGKey(123),
             state={"x": 1},
@@ -49,8 +55,9 @@ class InvocationContextTest(absltest.TestCase):
         self.assertEqual({"z": 3}, context.get_state_updates())
 
     def testContextStack(self):
+        module1 = new_test_module("test1")
         context1 = InvocationContext(
-            module=None,
+            module=module1,
             is_training=True,
             prng_key=jax.random.PRNGKey(123),
             state={"x": 1},
@@ -58,9 +65,12 @@ class InvocationContextTest(absltest.TestCase):
         )
         with set_current_context(context1):
             self.assertIs(current_context(), context1)
-            self.assertEqual(current_context().state["x"], 1)
+            self.assertEqual(
+                current_context().state["x"], 1
+            )  # pytype: disable=attribute-error
+            module2 = new_test_module("test2")
             context2 = InvocationContext(
-                module=None,
+                module=module2,
                 is_training=True,
                 prng_key=jax.random.PRNGKey(123),
                 state={"x": 2},
@@ -68,11 +78,15 @@ class InvocationContextTest(absltest.TestCase):
             )
             with set_current_context(context2):
                 self.assertIs(current_context(), context2)
-                self.assertEqual(current_context().state["x"], 2)
+                self.assertEqual(
+                    current_context().state["x"], 2
+                )  # pytype: disable=attribute-error
 
             # No longer in context2, but still in context1.
             self.assertIs(current_context(), context1)
-            self.assertEqual(current_context().state["x"], 1)
+            self.assertEqual(
+                current_context().state["x"], 1
+            )  # pytype: disable=attribute-error
 
 
 class TestLayer(BaseLayer):

@@ -8,3 +8,5 @@ tensorflow  # needed for tfds and summary
 torch  # test-only
 torchvision  # test-only
 transformers  # test-only
+
+pytype  # type checking

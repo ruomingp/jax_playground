@@ -1,5 +1,5 @@
 import math
-from typing import Callable, Sequence, Union
+from typing import Callable, List, Union
 
 import jax
 from jax import numpy as jnp
@@ -93,7 +93,7 @@ def inverse_sqrt(step: int) -> float:
     return jnp.maximum(1, step) ** -0.5
 
 
-def stepwise(sub: Sequence[Schedule], start_step: Sequence[int]) -> ScheduleFn:
+def stepwise(sub: List[Schedule], start_step: List[int]) -> ScheduleFn:
     """A composite schedule consisting of multiple sub-schedules.
 
     The first sub-schedule starts at step 0. For the rest of sub-schedules, sub[i] starts at start_step[i-1].

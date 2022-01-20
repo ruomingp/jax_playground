@@ -1,3 +1,5 @@
+from typing import Any, Dict, Union
+
 import jax
 import numpy as np
 import torch
@@ -9,8 +11,6 @@ from transformers.models.roberta import modeling_roberta as hf_roberta
 
 import attention
 import layers
-import module
-import utils
 from attention import (
     TransformerLayer,
     TransformerAttentionLayer,
@@ -222,11 +222,12 @@ class MultiheadAttentionTest(absltest.TestCase):
         self.assertTrue(jnp.all(jnp.isfinite(layer_output_data)), layer_output_data)
 
 
-def _to_jtensor(x):
+def _to_jtensor(x: Union[jnp.ndarray, torch.Tensor, Dict[str, Any]]):
     if isinstance(x, jnp.ndarray):
         return x
     if isinstance(x, torch.Tensor):
-        return jnp.asarray(x.detach().numpy())
+        t = x  # type: torch.Tensor
+        return jnp.asarray(t.detach().numpy())
     return jax.tree_map(_to_jtensor, x)
 
 
@@ -290,32 +291,6 @@ def _parameters_from_roberta_layer(src: hf_roberta.RobertaLayer):
 
 def _as_torch_tensor(src: jnp.ndarray):
     return torch.as_tensor(np.asarray(src).copy())
-
-
-def _copy_parameters(src: Module, dst: Module):
-    with jnp.no_grad():
-        for (src_name, src_param), (dst_name, dst_param) in zip(
-            src.named_parameters(), dst.named_parameters()
-        ):
-            assert src_name == dst_name, f"{src_name} != {dst_name}"
-            dst_param.copy_(src_param)
-
-
-def _copy_transformer_parameters(src: Module, dst: attention.TransformerLayer):
-    logging.debug(
-        "src parameters: %s",
-        [(name, param.shape) for name, param in src.named_parameters()],
-    )
-    _copy_parameters(src.norm1, dst.self_attention.norm)
-    _copy_attention_parameters(src.self_attn, dst.self_attention.attention)
-    if hasattr(src, "multihead_attn"):
-        _copy_parameters(src.norm2, dst.cross_attention.norm)
-        _copy_attention_parameters(src.multihead_attn, dst.cross_attention.attention)
-        _copy_parameters(src.norm3, dst.feed_forward.norm)
-    else:
-        _copy_parameters(src.norm2, dst.feed_forward.norm)
-    _copy_parameters(src.linear1, dst.feed_forward.linear1)
-    _copy_parameters(src.linear2, dst.feed_forward.linear2)
 
 
 class TransformerTest(absltest.TestCase):

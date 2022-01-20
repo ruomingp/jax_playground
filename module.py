@@ -7,9 +7,6 @@ Design choices:
 * A module's config is frozen upon __init__. This prevents the config from being modified by accident.
 * Module.config returns a copy of the module's config. This allows the caller to make changes without affecting the
   original config.
-
-TBD:
-* Should add_summary() take WeightedScalar?
 """
 import contextlib
 import copy
@@ -26,9 +23,11 @@ from jax.experimental.pjit import PartitionSpec
 
 import config as config_lib
 import param_init
+from metrics import WeightedScalar
 from utils import NestedTensor, Tensor
 
-NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, "NestedPartitionSpec"]]]
+# NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, "NestedPartitionSpec"]]]
+NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, Any]]]
 
 
 class OutputCollection(NamedTuple):
@@ -83,10 +82,10 @@ class InvocationContext:
             output_collection=self.output_collection.add_child(name),
         )
 
-    def add_summary(self, name: str, value: jnp.ndarray):
+    def add_summary(self, name: str, value: Union[WeightedScalar, Tensor]):
         self.output_collection.summaries[name] = value
 
-    def add_state_update(self, name: str, value: jnp.ndarray):
+    def add_state_update(self, name: str, value: Tensor):
         self.output_collection.state_updates[name] = value
 
     def get_summaries(self):
@@ -208,10 +207,10 @@ class Module(config_lib.Configurable):
     def state(self):
         return self.get_invocation_context().state
 
-    def add_summary(self, name: str, value: jnp.ndarray):
+    def add_summary(self, name: str, value: Union[WeightedScalar, Tensor]):
         return self.get_invocation_context().add_summary(name, value)
 
-    def add_state_update(self, name: str, value: jnp.ndarray):
+    def add_state_update(self, name: str, value: Tensor):
         return self.get_invocation_context().add_state_update(name, value)
 
     def __call__(self, *args, method="forward", context=None, **kwargs) -> Any:
@@ -306,7 +305,9 @@ class ParameterSpec:
     initializer: Optional[param_init.Initializer] = None
 
 
-NestedParameterSpec = Dict[str, Union[ParameterSpec, "NestedParameterSpec"]]
+# When pytype supports recursive typing:
+# NestedParameterSpec = Dict[str, Union[ParameterSpec, "NestedParameterSpec"]]
+NestedParameterSpec = Dict[str, Union[ParameterSpec, Any]]
 
 
 class BaseLayer(Module):

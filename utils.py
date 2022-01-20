@@ -6,8 +6,9 @@ import numpy
 from jax import numpy as jnp
 
 Tensor = jnp.ndarray
-NestedTree = Dict[str, Union[Any, "NestedTree"]]
-NestedTensor = Dict[str, Union[Tensor, "NestedTensor"]]
+# Recursive type annotations not supported by pytype yet.
+NestedTree = Union[Any, Dict[str, Any]]  # Union[Any, Dict[str, "NestedTree"]]
+NestedTensor = Union[Tensor, Dict[str, Any]]  # Union[Tensor, Dict[str, "NestedTensor"]]
 
 enable_numeric_checks = False
 
@@ -46,9 +47,7 @@ def tree_paths(tree: NestedTree, separator="/") -> NestedTree:
 
     def visit(tree, prefix):
         if isinstance(tree, dict):
-            return type(tree)(
-                {k: visit(v, _concat(prefix, k)) for k, v in tree.items()}
-            )
+            return {k: visit(v, _concat(prefix, k)) for k, v in tree.items()}
         elif is_named_tuple(tree):
             return type(tree)(**visit(tree._asdict(), prefix))
         elif isinstance(tree, (list, tuple)):
