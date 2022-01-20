@@ -32,7 +32,8 @@ flags.DEFINE_string(
     required=True,
 )
 flags.DEFINE_string(
-    "data_dir", None, "The tfds directory. If None, uses ~/tensorflow_datasets."
+    "data_dir", "gs://permanent-us-central1-q5loch/tensorflow_datasets",
+    "The tfds directory. If None, uses ~/tensorflow_datasets."
 )
 flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
@@ -56,7 +57,7 @@ def imagenet_trainer_config():
         split="train",
         is_training=True,
         global_batch_size=train_batch_size,
-        data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
+        data_dir=FLAGS.data_dir,
         read_parallelism=read_parallelism,
         decode_parallelism=128,
         process_parallelism=1024,
