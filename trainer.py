@@ -1,22 +1,20 @@
-from typing import Any, Callable, Dict, NamedTuple, Optional
 import time
+from functools import partial
+from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 
 import jax
 from absl import logging
 from jax import numpy as jnp
 from jax.experimental import PartitionSpec
 from jax.experimental.pjit import pjit
-from functools import partial
 
 import checkpointer
-import config
 import config as config_lib
 import learner
 import metrics
-import module
 import summary_writer
-from module import functional as F, Module, NestedTensor, NestedPartitionSpec, OutputCollection
-from utils import Tensor, as_tensor, tree_paths, flatten_items
+from module import functional as F, Module, NestedTensor, NestedPartitionSpec
+from utils import Tensor, tree_paths
 
 
 def _apply_updates(base, updates):
@@ -74,9 +72,9 @@ class _SpmdRunner(Module):
 
 
 class _TrainerState(NamedTuple):
-    step: Tensor
-    model: NestedTensor
-    learner: learner.LearnerState
+    step: Union[Tensor, NestedPartitionSpec]
+    model: Union[NestedTensor, NestedPartitionSpec]
+    learner: Union[learner.LearnerState, NestedPartitionSpec]
 
 
 class SpmdTrainer(_SpmdRunner):
@@ -209,7 +207,9 @@ class SpmdTrainer(_SpmdRunner):
                 jax.process_index(),
                 self.step,
                 outputs["loss"],
-                jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
+                jax.tree_map(
+                    lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
+                ),
             )
         self.summary_writer(
             self.step, {"loss": outputs["loss"], **outputs["summaries"]}
@@ -217,7 +217,11 @@ class SpmdTrainer(_SpmdRunner):
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
-                self.step, eval_key, model=self.model, model_params=self._state.model, model_param_partition_spec=self._trainer_state_partition_specs.model
+                self.step,
+                eval_key,
+                model=self.model,
+                model_params=self._state.model,
+                model_param_partition_spec=self._trainer_state_partition_specs.model,
             )
         self.checkpointer.save(step=self.step, state=self._state)
 
@@ -229,22 +233,18 @@ class SpmdTrainer(_SpmdRunner):
     ):
         prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
 
-        def _forward(model_parameters, input_batch):
+        def _forward(model_parameters, forward_input_batch):
             (loss, aux), model_output_collection = F(
                 self.model,
                 state=model_parameters,
                 is_training=True,
                 prng_key=forward_key,
-                inputs=input_batch,
-                output_collection_sections=(
-                    OutputCollection.SECTION_SUMMARY,
-                    OutputCollection.SECTION_STATE_UPDATE,
-                ),
+                inputs=forward_input_batch,
             )
-            return loss, dict(aux=aux, **model_output_collection)
+            return loss, (aux, model_output_collection)
 
         _forward_and_grad = jax.value_and_grad(_forward, has_aux=True)
-        (loss, forward_output_collection), grads = _forward_and_grad(
+        (loss, (forward_aux, forward_output_collection)), grads = _forward_and_grad(
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
@@ -255,31 +255,24 @@ class SpmdTrainer(_SpmdRunner):
             is_training=True,
             prng_key=learner_key,
             inputs=dict(step=state.step, model_params=state.model, gradients=grads),
-            output_collection_sections=[
-                OutputCollection.SECTION_STATE_UPDATE,
-                OutputCollection.SECTION_SUMMARY,
-            ],
         )
         updated_state = _TrainerState(
             step=state.step + 1,
             model=_apply_updates(
-                updated_model_params,
-                forward_output_collection[OutputCollection.SECTION_STATE_UPDATE],
+                updated_model_params, forward_output_collection.state_updates
             ),
-            learner=learner.LearnerState(
-                **learner_output_collection[OutputCollection.SECTION_STATE_UPDATE]
-            ),
+            learner=learner.LearnerState(**learner_output_collection.state_updates),
         )
         # TODO(ruoming): only retrieve summaries when necessary.
         summaries = dict(
-            model=forward_output_collection[OutputCollection.SECTION_SUMMARY],
-            learner=learner_output_collection[OutputCollection.SECTION_SUMMARY],
+            model=forward_output_collection.summaries,
+            learner=learner_output_collection.summaries,
         )
         return dict(
             state=updated_state,
             summaries=summaries,
             loss=loss,
-            aux=forward_output_collection["aux"],
+            aux=forward_aux,
         )
 
 
@@ -312,7 +305,6 @@ class SpmdEvaler(_SpmdRunner):
                 F,
                 model,
                 is_training=False,
-                output_collection_sections=[OutputCollection.SECTION_SUMMARY],
             ),
             in_axis_resources=(
                 None,  # prng_key
@@ -338,7 +330,7 @@ class SpmdEvaler(_SpmdRunner):
                 self.path(),
                 jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", aux),
             )
-            metric_accumulator.update(output_collection[OutputCollection.SECTION_SUMMARY])
+            metric_accumulator.update(output_collection.summaries)
         summaries = metric_accumulator.summaries()
         logging.info(
             "Process % 3d step % 8d: %s.metrics=%s",

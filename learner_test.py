@@ -58,8 +58,8 @@ class LearnerTest(parameterized.TestCase):
         )
         learner: Learner = (
             Learner.default_config()
-                .set(name="test", optimizer=optimizer_cfg)
-                .instantiate(parent=None)
+            .set(name="test", optimizer=optimizer_cfg)
+            .instantiate(parent=None)
         )
 
         params = jnp.asarray([0, 1, 2, -3], dtype=jnp.float32)
@@ -74,13 +74,14 @@ class LearnerTest(parameterized.TestCase):
             grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6
         )
 
-        updated_params, output_collection = jax.jit(partial(
-            F, learner, method="update", is_training=True,
-            output_collection_sections=[
-                OutputCollection.SECTION_STATE_UPDATE,
-                OutputCollection.SECTION_SUMMARY,
-            ],
-        ))(
+        updated_params, output_collection = jax.jit(
+            partial(
+                F,
+                learner,
+                method="update",
+                is_training=True,
+            )
+        )(
             prng_key=jax.random.PRNGKey(123),
             state=state,
             inputs=dict(step=step, gradients=grads, model_params=params),
@@ -90,15 +91,11 @@ class LearnerTest(parameterized.TestCase):
             params - learning_rate_fn(step) * (grads + weight_decay * params),
             atol=1e-6,
         )
-        self.assertCountEqual(
-            [OutputCollection.SECTION_STATE_UPDATE, OutputCollection.SECTION_SUMMARY],
-            output_collection.keys(),
-        )
-        summaries = output_collection[OutputCollection.SECTION_SUMMARY]
+        summaries = output_collection.summaries
         self.assertEqual(
             {"learning_rate": learning_rate_fn(step), "lr_schedule_step": 0}, summaries
         )
-        state_updates = output_collection[OutputCollection.SECTION_STATE_UPDATE]
+        state_updates = output_collection.state_updates
         self.assertNestedEqual(
             {
                 "optimizer": (

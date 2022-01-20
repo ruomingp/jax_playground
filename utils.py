@@ -1,6 +1,5 @@
 import numbers
 from typing import Any, Dict, Mapping, Sequence, Tuple, Union
-from absl import logging
 
 import jax
 import numpy

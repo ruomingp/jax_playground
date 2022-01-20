@@ -32,8 +32,9 @@ flags.DEFINE_string(
     required=True,
 )
 flags.DEFINE_string(
-    "data_dir", "gs://permanent-us-central1-q5loch/tensorflow_datasets",
-    "The tfds directory. If None, uses ~/tensorflow_datasets."
+    "data_dir",
+    "gs://permanent-us-central1-q5loch/tensorflow_datasets",
+    "The tfds directory. If None, uses ~/tensorflow_datasets.",
 )
 flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
@@ -72,11 +73,15 @@ def imagenet_trainer_config():
     cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
     evaler_train = SpmdEvaler.default_config().set(
         name="eval_train",
-        input=ImagenetInput.default_config().set(split="train[:160]" if FLAGS.debug else "train[0:50000]"),
+        input=ImagenetInput.default_config().set(
+            split="train[:160]" if FLAGS.debug else "train[0:50000]"
+        ),
     )
     evaler_validation = SpmdEvaler.default_config().set(
         name="eval_validation",
-        input=ImagenetInput.default_config().set(split="validation[:160]" if FLAGS.debug else "validation"),
+        input=ImagenetInput.default_config().set(
+            split="validation[:160]" if FLAGS.debug else "validation"
+        ),
     )
     cfg.evalers = (evaler_train, evaler_validation)
 
@@ -112,7 +117,7 @@ def run_trainer(trainer_config, mesh_shape):
     devices = mesh_utils.create_device_mesh(mesh_shape)
     mesh = maps.Mesh(devices, ("data", "model"))
     with maps.mesh(mesh.devices, mesh.axis_names):
-        trainer.run(prng_key, max_step=1000000)
+        trainer.run(prng_key, max_step=100 if FLAGS.debug else 1000000)
 
 
 def main(argv):

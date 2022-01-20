@@ -21,12 +21,12 @@ def as_schedule_fn(s: Schedule) -> ScheduleFn:
 
 
 def polynomial(
-        *,
-        begin_step: int = 0,
-        begin_value: float = 0,
-        end_step: int = 1,
-        end_value: float = 0,
-        power: float = 1,
+    *,
+    begin_step: int = 0,
+    begin_value: float = 0,
+    end_step: int = 1,
+    end_value: float = 0,
+    power: float = 1,
 ) -> ScheduleFn:
     """A polynomial (linear when power=1) schedule.
 
@@ -52,11 +52,11 @@ def polynomial(
 
 
 def exponential(
-        *,
-        begin_step: int = 0,
-        begin_value: float = 0,
-        end_step: int = 1,
-        end_value: float = 0,
+    *,
+    begin_step: int = 0,
+    begin_value: float = 0,
+    end_step: int = 1,
+    end_value: float = 0,
 ) -> ScheduleFn:
     """An exponential schedule.
 
@@ -118,12 +118,18 @@ def stepwise(sub: Sequence[Schedule], start_step: Sequence[int]) -> ScheduleFn:
     all_limit_steps = start_step + [-1]
 
     def fn(step: Tensor) -> Tensor:
-        values = [s(jnp.maximum(0, step - start)) for s, start in zip(sub, all_start_steps)]
+        values = [
+            s(jnp.maximum(0, step - start)) for s, start in zip(sub, all_start_steps)
+        ]
         activations = [
-            jnp.logical_and(jax.lax.le(start, step),
-                            jnp.logical_or(limit < 0, jax.lax.lt(step, limit)),
-                            ).astype(jnp.float32)
-            for start, limit in zip(all_start_steps, all_limit_steps)]
-        return sum([value * activation for value, activation in zip(values, activations)])
+            jnp.logical_and(
+                jax.lax.le(start, step),
+                jnp.logical_or(limit < 0, jax.lax.lt(step, limit)),
+            ).astype(jnp.float32)
+            for start, limit in zip(all_start_steps, all_limit_steps)
+        ]
+        return sum(
+            [value * activation for value, activation in zip(values, activations)]
+        )
 
     return fn

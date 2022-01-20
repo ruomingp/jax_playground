@@ -51,9 +51,7 @@ class ScheduleTest(absltest.TestCase):
             self.assertAlmostEqual(1 / math.sqrt(step), value)
 
     def testStepwise(self):
-        s = jax.jit(schedule.stepwise(
-            start_step=[100, 200],
-            sub=[0.1, 0.01, 0.001]))
+        s = jax.jit(schedule.stepwise(start_step=[100, 200], sub=[0.1, 0.01, 0.001]))
         for step in range(0, 300, 50):
             value = s(step)
             if step < 100:
@@ -64,13 +62,15 @@ class ScheduleTest(absltest.TestCase):
                 self.assertEqual(0.001, value)
 
     def testT5(self):
-        s = jax.jit(schedule.stepwise(
-            start_step=[100],
-            sub=[
-                schedule.polynomial(end_step=100, end_value=0.1),
-                lambda step: schedule.inverse_sqrt(step + 100),
-            ],
-        ))
+        s = jax.jit(
+            schedule.stepwise(
+                start_step=[100],
+                sub=[
+                    schedule.polynomial(end_step=100, end_value=0.1),
+                    lambda step: schedule.inverse_sqrt(step + 100),
+                ],
+            )
+        )
         for step in range(200):
             value = s(step)
             logging.info("step=%s value=%s", step, value)

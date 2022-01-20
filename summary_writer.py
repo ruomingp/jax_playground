@@ -36,8 +36,11 @@ class SummaryWriter(Module):
         if step % cfg.write_every_n_steps != 0:
             return
         with self.summary_writer.as_default(step=step):
-            values = jax.tree_map(lambda v: v.mean if isinstance(v, WeightedScalar) else v, values,
-                                  is_leaf=lambda x: isinstance(x, WeightedScalar))
+            values = jax.tree_map(
+                lambda v: v.mean if isinstance(v, WeightedScalar) else v,
+                values,
+                is_leaf=lambda x: isinstance(x, WeightedScalar),
+            )
 
             def write(path: str, value: jnp.ndarray):
                 logging.info("SummaryWriter %s: %s=%s", self.path(), path, value)

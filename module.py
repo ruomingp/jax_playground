@@ -16,9 +16,8 @@ import copy
 import dataclasses
 import re
 import threading
-from collections import abc
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Set
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import jax
 from absl import logging
@@ -29,72 +28,26 @@ import config as config_lib
 import param_init
 from utils import NestedTensor, Tensor
 
-NestedPartitionSpec = Dict[str, Union[PartitionSpec, "NestedPartitionSpec"]]
+NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, "NestedPartitionSpec"]]]
 
 
-class FrozenDict(abc.Mapping):
-    def __init__(self, *args, **kwargs):
-        self.contents = dict(*args, **kwargs)
-
-    def __iter__(self):
-        return iter(self.contents)
-
-    def __len__(self):
-        return len(self.contents)
-
-    def __getitem__(self, name):
-        return self.contents[name]
-
-    def __eq__(self, other):
-        return isinstance(other, FrozenDict) and self.contents == other.contents
-
-    def __hash__(self):
-        return hash(tuple(self.contents.items()))
-
-    def __repr__(self):
-        return f"FrozenDict({self.contents})"
-
-
-class OutputCollection:
-    # Some standard section names.
-    SECTION_DEFAULT = ""
-    SECTION_SUMMARY = "summaries"
-    SECTION_STATE_UPDATE = "state_updates"
-
-    def __init__(self):
-        self._all_names: Set[str] = set()
-        self._children: Dict[str, "OutputCollection"] = dict()
-        self._sections: Dict[str, Dict[str, jnp.ndarray]] = dict()
-
-    def _check_name(self, name):
-        if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
-            raise ValueError(f'Invalid name "{name}"')
-        if name in self._all_names:
-            raise ValueError(f"{name} already added as a child or output")
-        self._all_names.add(name)
-
-    def add_value(self, name: str, value: Any, *, section: str = SECTION_DEFAULT):
-        self._check_name(name)
-        if section not in self._sections:
-            self._sections[section] = {}
-        self._sections[section][name] = value
+class OutputCollection(NamedTuple):
+    summaries: NestedTensor
+    state_updates: NestedTensor
 
     def add_child(self, name: str) -> "OutputCollection":
-        self._check_name(name)
-        self._children[name] = OutputCollection()
-        return self._children[name]
+        if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
+            raise ValueError(f'Invalid child name "{name}"')
+        if name in self.summaries or name in self.state_updates:
+            raise ValueError(f"{name} already present")
+        child = new_output_collection()
+        self.summaries[name] = child.summaries
+        self.state_updates[name] = child.state_updates
+        return child
 
-    def get_values_recursively(
-        self, section: str = SECTION_DEFAULT
-    ) -> Dict[str, Union[jnp.ndarray, dict]]:
-        results = {}
-        if section in self._sections:
-            results.update(self._sections[section])
-        for child_name, child_collection in self._children.items():
-            child_values = child_collection.get_values_recursively(section)
-            if child_values:
-                results[child_name] = child_values
-        return results
+
+def new_output_collection():
+    return OutputCollection(summaries={}, state_updates={})
 
 
 @dataclass
@@ -131,24 +84,16 @@ class InvocationContext:
         )
 
     def add_summary(self, name: str, value: jnp.ndarray):
-        return self.output_collection.add_value(
-            name, value, section=OutputCollection.SECTION_SUMMARY
-        )
+        self.output_collection.summaries[name] = value
 
     def add_state_update(self, name: str, value: jnp.ndarray):
-        return self.output_collection.add_value(
-            name, value, section=OutputCollection.SECTION_STATE_UPDATE
-        )
+        self.output_collection.state_updates[name] = value
 
     def get_summaries(self):
-        return self.output_collection.get_values_recursively(
-            OutputCollection.SECTION_SUMMARY
-        )
+        return self.output_collection.summaries
 
     def get_state_updates(self):
-        return self.output_collection.get_values_recursively(
-            OutputCollection.SECTION_STATE_UPDATE
-        )
+        return self.output_collection.state_updates
 
 
 @dataclass
@@ -159,7 +104,7 @@ class ContextStack(threading.local):
 _global_context_stack = ContextStack(stack=[])
 
 
-def current_context() -> InvocationContext:
+def current_context() -> Optional[InvocationContext]:
     global _global_context_stack
     if not _global_context_stack.stack:
         return None
@@ -279,7 +224,9 @@ class Module(config_lib.Configurable):
                 method,
             )
 
-        f = lambda: getattr(self, method)(*args, **kwargs)
+        def f():
+            return getattr(self, method)(*args, **kwargs)
+
         if context is not None:
             with set_current_context(context):
                 return f()
@@ -305,12 +252,13 @@ def functional(
     *,
     method: str = "forward",
     is_training: bool,
-    output_collection_sections: Sequence[str] = tuple(),
-) -> Tuple[Any, Dict[str, NestedTensor]]:
+) -> Tuple[Any, OutputCollection]:
     """Invokes <module>.<method> in a pure functional fashion.
 
     The invocation will not depend on external inputs or have any side effects. The results only depend on the given
     inputs. All outputs are reflected in the return value.
+
+    TODO(ruoming): support output collection filter.
 
     Args:
         module: The Module to invoke.
@@ -320,18 +268,16 @@ def functional(
           it represents keyword args.
         method: The Module method to invoke.
         is_training: Whether the invocation should run in the training mode.
-        output_collection_sections: A sequence of output collection section names.
 
     Returns:
         (method_outputs, output_collection), where
         - method_outputs are the return value of the method.
-        - output_collection is a dict whose keys are output_collection_sections and values are NestedTensors for
-          the corresponding output section. This can be used to collect summaries and module state updates.
+        - output_collection is an OutputCollection containing summaries and state updates.
     """
     context = InvocationContext(
         module=module,
         state=state,
-        output_collection=OutputCollection(),
+        output_collection=new_output_collection(),
         is_training=is_training,
         prng_key=prng_key,
     )
@@ -342,11 +288,7 @@ def functional(
         else:
             input_args, input_kwargs = inputs, {}
         method_outputs = getattr(module, method)(*input_args, **input_kwargs)
-    output_collections = {
-        section: context.output_collection.get_values_recursively(section)
-        for section in output_collection_sections
-    }
-    return method_outputs, output_collections
+    return method_outputs, context.output_collection
 
 
 @dataclasses.dataclass

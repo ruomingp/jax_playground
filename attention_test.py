@@ -10,6 +10,7 @@ from transformers.models.roberta import modeling_roberta as hf_roberta
 import attention
 import layers
 import module
+import utils
 from attention import (
     TransformerLayer,
     TransformerAttentionLayer,
@@ -400,13 +401,12 @@ class TransformerTest(absltest.TestCase):
                 state=layer_params,
                 is_training=True,
                 prng_key=jax.random.PRNGKey(0),
-                output_collection_sections=[module.OutputCollection.SECTION_SUMMARY],
             )
             self.assertEqual(
-                {"self_attention": {"attention": {"atten_probs": (2, 4, 6, 6)}}},
-                _shapes(
-                    layer_output_collection[module.OutputCollection.SECTION_SUMMARY]
-                ),
+                (2, 4, 6, 6),
+                layer_output_collection.summaries["self_attention"]["attention"][
+                    "atten_probs"
+                ].shape,
             )
             attn_mask = None if mask is None else _as_torch_tensor(mask)
             (ref_outputs,) = ref.forward(

@@ -79,7 +79,7 @@ def validate_config_field_value(value: Any) -> None:
     elif dataclasses.is_dataclass(value):
         validate_config_field_value(value.__dict__)
     elif value is None or isinstance(
-            value, (Config, type, types.FunctionType, int, float, str, enum.Enum, np.dtype)
+        value, (Config, type, types.FunctionType, int, float, str, enum.Enum, np.dtype)
     ):
         pass
     else:
@@ -205,10 +205,10 @@ class Config:
         return self.debug_string(kv_separator=":", field_separator="; ")
 
     def visit(
-            self,
-            visit_fn: Callable[[str, Any], None],
-            enter_fn: Optional[Callable[[str, Any, Optional[List]], Optional[List]]] = None,
-            exit_fn: Optional[Callable[[str, Any], None]] = None,
+        self,
+        visit_fn: Callable[[str, Any], None],
+        enter_fn: Optional[Callable[[str, Any, Optional[List]], Optional[List]]] = None,
+        exit_fn: Optional[Callable[[str, Any], None]] = None,
     ):
         """Recursively visits objects within this Config instance.
 
@@ -285,7 +285,7 @@ class Config:
             trials = 0
             for i in range(len(name) - 3):
                 trials += 1
-                if name[i: i + 3] in key:
+                if name[i : i + 3] in key:
                     matches += 1
             if trials:
                 return float(matches) / trials

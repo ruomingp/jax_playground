@@ -169,13 +169,8 @@ class LayerTest(parameterized.TestCase):
                 is_training=is_training,
                 state=layer_params,
                 prng_key=prng_key,
-                output_collection_sections=[
-                    module.OutputCollection.SECTION_STATE_UPDATE
-                ],
             )
-            param_updates = output_collection[
-                module.OutputCollection.SECTION_STATE_UPDATE
-            ]
+            param_updates = output_collection.state_updates
             if is_training:
                 # The output mean should be close to 0.
                 output_mean = jnp.mean(outputs, axis=(0, 1), keepdims=True)

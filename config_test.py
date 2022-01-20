@@ -70,7 +70,7 @@ class ConfigTest(absltest.TestCase):
                     "sub[0]: None",
                     "sub[1]: 123",
                     "sub[2]: str",
-                    "sub[3]: <class 'numpy.float64'>",
+                    "sub[3]: numpy.float64",
                 ]
             ),
             cfg.debug_string(),
@@ -83,7 +83,7 @@ class ConfigTest(absltest.TestCase):
                     "sub[0]: None",
                     "sub[1]: 123",
                     "sub[2]: str",
-                    "sub[3]: <class 'numpy.float64'>",
+                    "sub[3]: numpy.float64",
                 ]
             ),
             cfg.debug_string(),
@@ -96,7 +96,7 @@ class ConfigTest(absltest.TestCase):
                     "sub[none]: None",
                     "sub[int]: 123",
                     "sub[str]: str",
-                    "sub[type]: <class 'numpy.float64'>",
+                    "sub[type]: numpy.float64",
                 ]
             ),
             cfg.debug_string(),
@@ -110,7 +110,7 @@ class ConfigTest(absltest.TestCase):
                     "sub[none]: None",
                     "sub[int]: 123",
                     "sub[str]: str",
-                    "sub[type]: <class 'numpy.float64'>",
+                    "sub[type]: numpy.float64",
                 ]
             ),
             cfg.debug_string(),
@@ -129,7 +129,7 @@ class ConfigTest(absltest.TestCase):
                 [
                     "sub[int_val]: 123",
                     "sub[str_val]: str",
-                    "sub[type_val]: <class 'numpy.float64'>",
+                    "sub[type_val]: numpy.float64",
                 ]
             ),
             cfg.debug_string(),
