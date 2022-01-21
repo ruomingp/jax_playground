@@ -1,3 +1,5 @@
+"""Misc tests about Jax."""
+
 import collections
 import dataclasses
 import typing

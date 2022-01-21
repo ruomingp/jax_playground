@@ -1,4 +1,5 @@
-"""
+"""Image input modules.
+
 References:
 - https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
 """
@@ -29,6 +30,7 @@ class ImagenetInput(TfdsInput):
         image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
         image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
         if cfg.is_training:
+            # TOOD(ruoming): support random cropping.
             image = tf.image.random_flip_left_right(image)
         image = tf.image.resize(
             [image], cfg.image_size, method=tf.image.ResizeMethod.BICUBIC

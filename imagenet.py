@@ -1,4 +1,5 @@
-"""
+"""A launcher to train ResNet-18 on ImageNet.
+
 On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
 dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)a
@@ -54,6 +55,22 @@ def imagenet_trainer_config():
 
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
+
+    # Model and optimization.
+    cfg.model = resnet.ResNetModel.resnet18_config()
+    learning_rate = config_lib.config_for_function(schedule.stepwise).set(
+        sub=[0.1, 0.01, 0.001],
+        start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
+    )
+    cfg.learner = learner.Learner.default_config().set(
+        optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
+            learning_rate=learning_rate,
+            momentum=0.9,
+            weight_decay=1e-4,
+        ),
+    )
+
+    # Training inputs.
     read_parallelism = 1
     cfg.input = ImagenetInput.default_config().set(
         split="train",
@@ -67,11 +84,7 @@ def imagenet_trainer_config():
         shuffle_buffer_size=read_parallelism * 1024,
     )
 
-    cfg.model = resnet.ResNetModel.resnet18_config()
-    cfg.summary_writer.write_every_n_steps = 100
-    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
-    cfg.checkpointer.write_every_n_steps = 10 if FLAGS.debug else steps_per_epoch
-    cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
+    # Evaluation.
     evaler_train = SpmdEvaler.default_config().set(
         name="eval_train",
         input=ImagenetInput.default_config().set(
@@ -86,7 +99,12 @@ def imagenet_trainer_config():
     )
     cfg.evalers = (evaler_train, evaler_validation)
 
+    # Summaries and checkpoints.
+    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
+    cfg.checkpointer.write_every_n_steps = 10 if FLAGS.debug else steps_per_epoch
+    cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
     summary_dir = os.path.join(FLAGS.dir, "summaries")
+    cfg.summary_writer.write_every_n_steps = 100
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     for evaler_cfg in cfg.evalers:
         evaler_cfg.run_every_n_steps = 10 if FLAGS.debug else steps_per_epoch
@@ -96,19 +114,6 @@ def imagenet_trainer_config():
             data_dir=FLAGS.data_dir,
         )
         evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
-
-    learning_rate = config_lib.config_for_function(schedule.stepwise).set(
-        sub=[0.1, 0.01, 0.001],
-        start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
-    )
-
-    cfg.learner = learner.Learner.default_config().set(
-        optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
-            learning_rate=learning_rate,
-            momentum=0.9,
-            weight_decay=1e-4,
-        ),
-    )
     return cfg
 
 

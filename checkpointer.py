@@ -1,3 +1,9 @@
+"""A simple checkpointer based on flax.training.checkpoints.
+
+It provides additional guards on top of the flax library to verify that dtypes and shapes match those of the model
+parameters.
+"""
+
 import difflib
 from typing import List, Optional
 

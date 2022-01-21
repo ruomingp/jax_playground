@@ -1,8 +1,9 @@
-import dataclasses
-from absl import logging
+"""Metrics."""
+
 from typing import Any, Dict, NamedTuple
 
 import jax
+from absl import logging
 from jax import numpy as jnp
 
 import config
@@ -22,13 +23,11 @@ class WeightedScalar(NamedTuple):
 
 
 class MetricAccumulator(config.Configurable):
+    """A MetricAccumulator is used during evaluation to accumulate metrics across batches."""
+
     def __init__(self, cfg: config.Config):
         super().__init__(cfg)
         self._scalars = {}
-
-    def tree_map(self, *args, **kwargs):
-        is_leaf = lambda x: isinstance(x, WeightedScalar)
-        return jax.tree_map(*args, **kwargs, is_leaf=is_leaf)
 
     def update(self, model_outputs: Dict[str, Any]):
         logging.debug(
@@ -36,14 +35,18 @@ class MetricAccumulator(config.Configurable):
             self._scalars,
             model_outputs,
         )
-        scalars = self.tree_map(
+        scalars = self._tree_map(
             lambda x: x if isinstance(x, WeightedScalar) else tuple(), model_outputs
         )
         if not self._scalars:
             self._scalars = scalars
         else:
-            self._scalars = self.tree_map(lambda x, y: x + y, self._scalars, scalars)
+            self._scalars = self._tree_map(lambda x, y: x + y, self._scalars, scalars)
         logging.debug("MetricAccumulator.update: merged=%s", self._scalars)
 
     def summaries(self) -> Dict[str, Any]:
-        return self.tree_map(lambda x: x.mean, self._scalars)
+        return self._tree_map(lambda x: x.mean, self._scalars)
+
+    def _tree_map(self, *args, **kwargs):
+        is_leaf = lambda x: isinstance(x, WeightedScalar)
+        return jax.tree_map(*args, **kwargs, is_leaf=is_leaf)

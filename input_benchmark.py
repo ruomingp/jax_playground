@@ -1,4 +1,5 @@
-"""
+"""An input benchmark to tune TFDS imagenet inputs from gs://.
+
 - Baseline
 Examples/sec (First excluded) 628.03 ex/sec (total: 256512 ex, 408.44 sec)
 - num_parallel_calls_for_interleave_files=1

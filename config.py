@@ -2,6 +2,8 @@
 
 Adapted from https://github.com/tensorflow/lingvo/blob/master/lingvo/core/hyperparams.py.
 
+See https://tinyurl.com/ml-api-styles for the design principles behind this config library.
+
 Example usage for configuring a module:
 
     class MyModule(Configurable):

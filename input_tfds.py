@@ -1,5 +1,6 @@
 """Tensorflow Dataset Inputs.
 
+Reference:
 https://github.com/mlperf/training_results_v0.6/blob/master/Google/benchmarks/resnet/implementations/tpu-v3-512-resnet/resnet/imagenet_input.py
 """
 from typing import Optional

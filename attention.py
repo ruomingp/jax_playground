@@ -1,3 +1,5 @@
+"""Attention layers with pjit partition specs."""
+
 import math
 from dataclasses import dataclass
 from typing import Dict, Optional
@@ -233,7 +235,7 @@ def masked_softmax(logits: Tensor, mask: Optional[Tensor] = None):
 class MultiheadAttention(BaseLayer):
     """A basic multi-head attention layer.
 
-    Differences from jnp.nn.MultiheadAttention:
+    Differences from torch.nn.MultiheadAttention:
     - Use of einsum for efficient computation on TPU to avoid reshaping;
     - Separate weights for {q,k,v}_proj for proper weight initialization that depends on fan-out and efficient TPU
       execution (where split is not free).
@@ -505,7 +507,7 @@ class TransformerFeedForwardLayer(BaseLayer):
 class TransformerLayer(BaseLayer):
     """A Transformer layer.
 
-    Unlike jnp.nn.TransformerLayer, this allows components to be customized, e.g., replacing vanilla attention with
+    Unlike torch.nn.TransformerLayer, this allows components to be customized, e.g., replacing vanilla attention with
     relative positional attention from TransformerXL/DeBERTa or replacing feed-forward with a mixture-of-expert
     feed-forward layer.
     """

@@ -1,3 +1,5 @@
+"""Basic layers."""
+
 from typing import Callable, Dict
 
 import jax

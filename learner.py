@@ -1,3 +1,4 @@
+"""Optimization modules."""
 import copy
 from typing import Callable, NamedTuple, Tuple, Union
 

@@ -1,3 +1,4 @@
+"""A simple test for pjit on TPU."""
 import jax
 import jax.numpy as jnp
 from jax.experimental import maps

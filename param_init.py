@@ -1,3 +1,5 @@
+"""Modules for configurable parameter initialization."""
+
 import math
 from typing import Sequence, Tuple
 
