@@ -1,8 +1,9 @@
 """
 On the TPU VM:
-dir=gs://permanent-us-central1-q5loch/${USER}/experiments/imagenet-$(date +%F)a
+gs_bucket=permanent-us-central1-q5loch
+dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)a
 echo $dir
-python3 imagenet.py --debug --dir=$dir 2>&1 | tee /tmp/log
+python3 imagenet.py --dir=$dir --data_dir=gs://${gs_bucket}/tensorflow_datasets 2>&1 | tee /tmp/log
 
 On your local machine:
 pip install tensorflow tbp-nightly
@@ -33,7 +34,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string(
     "data_dir",
-    "gs://permanent-us-central1-q5loch/tensorflow_datasets",
+    None,
     "The tfds directory. If None, uses ~/tensorflow_datasets.",
 )
 flags.DEFINE_list(
@@ -117,7 +118,7 @@ def run_trainer(trainer_config, mesh_shape):
     devices = mesh_utils.create_device_mesh(mesh_shape)
     mesh = maps.Mesh(devices, ("data", "model"))
     with maps.mesh(mesh.devices, mesh.axis_names):
-        trainer.run(prng_key, max_step=200 if FLAGS.debug else 12000)
+        trainer.run(prng_key, max_step=100 if FLAGS.debug else 12000)
 
 
 def main(argv):
