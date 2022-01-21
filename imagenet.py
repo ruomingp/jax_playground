@@ -39,7 +39,7 @@ flags.DEFINE_string(
 flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
 )
-flags.DEFINE_integer("jax_profiler_port", 9999, "The profiler port.")
+flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
 flags.DEFINE_bool("debug", False, "If true, run in the debug mode.")
 
 FLAGS = flags.FLAGS
