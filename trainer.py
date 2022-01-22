@@ -136,6 +136,7 @@ class SpmdTrainer(_SpmdRunner):
 
     def run(self, prng_key: jax.random.KeyArray, max_step: int):
         cfg = self.config
+        logging.info("Run %s up to step %s", self.path(), max_step)
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
