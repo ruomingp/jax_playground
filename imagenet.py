@@ -4,7 +4,9 @@ On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
 dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)a
 echo $dir
-python3 imagenet.py --dir=$dir --data_dir=gs://${gs_bucket}/tensorflow_datasets 2>&1 | tee /tmp/log
+data_dir=gs://${gs_bucket}/tensorflow_datasets
+echo $data_dir
+python3 imagenet.py --dir=$dir --data_dir=$data_dir 2>&1 | tee /tmp/log
 
 On your local machine:
 pip install tensorflow tbp-nightly
@@ -13,6 +15,7 @@ tensorboard --logdir=$dir/summaries
 """
 import os.path
 
+import tensorflow as tf
 import jax
 from absl import app, flags, logging
 from jax.experimental import maps
@@ -131,10 +134,12 @@ def main(argv):
     if FLAGS.jax_profiler_port is not None:
         server = jax.profiler.start_server(FLAGS.jax_profiler_port)
 
+    logging.info("Creating trainer config")
     trainer_config = imagenet_trainer_config()
     logging.info("Trainer config: %s", trainer_config.debug_string())
     run_trainer(trainer_config, FLAGS.mesh_shape)
 
 
 if __name__ == "__main__":
+    # tf.compat.v1.app.run(main)
     app.run(main)

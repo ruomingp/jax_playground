@@ -58,21 +58,64 @@ Examples/sec (First excluded) 778.76 ex/sec (total: 128512 ex, 165.02 sec)
 Examples/sec (First excluded) 1157.43 ex/sec (total: 128512 ex, 111.03 sec)
 """
 
-from image import ImagenetInput
+from absl import app
+import jax
+import tensorflow as tf
 import tensorflow_datasets as tfds
 
-read_parallelism, decode_parallelism, process_parallelism = 1, 128, 1024
-cfg = ImagenetInput.default_config().set(
-    name="benchmark",
-    split="train",
-    is_training=True,
-    prefetch_buffer_size=read_parallelism * 1024,
-    shuffle_buffer_size=read_parallelism * 1024,
-    read_parallelism=read_parallelism,
-    decode_parallelism=decode_parallelism,
-    process_parallelism=process_parallelism,
-    global_batch_size=256,
-    data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
-)
-inputs = cfg.instantiate(parent=None)
-print(tfds.benchmark(inputs, batch_size=256, num_iter=500).stats)
+from image import ImagenetInput
+
+
+MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
+STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
+
+
+def _process_example(example):
+    image = example["image"]
+    image = tf.cast(tf.convert_to_tensor(image), tf.float32)
+    image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
+    image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
+    image = tf.image.resize([image], (224, 224), method=tf.image.ResizeMethod.BICUBIC)[0]
+    image = tf.image.random_flip_left_right(image)
+    return {"image": image, "label": example["label"]}
+
+
+def create_dataset():
+    batch_size=256
+    builder = tfds.builder("imagenet2012", data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets")
+    split = tfds.even_splits("train", n=jax.process_count(), drop_remainder=True)[jax.process_index()]
+    ds: tf.data.Dataset = builder.as_dataset(split=split, shuffle_files=True)
+    ds = ds.map(_process_example, num_parallel_calls=32)
+    ds = ds.shuffle(8192, reshuffle_each_iteration=True)
+    ds = ds.batch(batch_size, drop_remainder=True)
+    ds = ds.repeat()
+    ds = ds.prefetch(8192)
+    return ds
+
+
+def create_dataset_from_config():
+    read_parallelism, decode_parallelism, process_parallelism = 1, 128, 1024
+    cfg = ImagenetInput.default_config().set(
+        name="benchmark",
+        split="train",
+        is_training=True,
+        prefetch_buffer_size=read_parallelism * 1024,
+        shuffle_buffer_size=read_parallelism * 1024,
+        read_parallelism=read_parallelism,
+        decode_parallelism=decode_parallelism,
+        process_parallelism=process_parallelism,
+        global_batch_size=256,
+        data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
+    )
+    inputs = cfg.instantiate(parent=None)
+    return inputs._dataset
+
+
+def main(argv):
+    inputs = create_dataset_from_config()
+    # inputs = create_dataset()
+    print(tfds.benchmark(inputs, batch_size=256, num_iter=100).stats)
+
+
+if __name__ == "__main__":
+    app.run(main)

@@ -80,9 +80,10 @@ class TfdsInput(Module):
                 f"process_count ({jax.process_count()})"
             )
         batch_size = cfg.global_batch_size // jax.process_count()
-        split = tfds.even_splits(
-            split, n=jax.process_count(), drop_remainder=cfg.is_training
-        )[jax.process_index()]
+        if jax.process_count() > 1:
+            split = tfds.even_splits(
+                split, n=jax.process_count(), drop_remainder=cfg.is_training
+            )[jax.process_index()]
         read_parallelism = cfg.read_parallelism if cfg.is_training else 1
         decode_parallelism = cfg.decode_parallelism if cfg.is_training else 1
         process_parallelism = cfg.process_parallelism if cfg.is_training else 1
@@ -91,6 +92,7 @@ class TfdsInput(Module):
             num_parallel_calls_for_interleave_files=read_parallelism,
             num_parallel_calls_for_decode=decode_parallelism,
         )
+        logging.info("split=%s", split)
         ds: tf.data.Dataset = builder.as_dataset(
             split=split,
             shuffle_files=cfg.is_training,

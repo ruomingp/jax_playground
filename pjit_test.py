@@ -1,4 +1,5 @@
 """A simple test for pjit on TPU."""
+import tensorflow as tf
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -52,4 +53,6 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    app.run(main)
+    # app.run(main)
+    # main(None)
+    tf.compat.v1.app.run(main)
