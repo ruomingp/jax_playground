@@ -18,7 +18,7 @@ class ImagenetInput(TfdsInput):
         cfg = super().default_config()
         cfg.define("image_size", (224, 224), "The image size.")
         cfg.dataset_name = "imagenet2012"
-        cfg.shuffle_buffer_size = 8192  # to be tuned.
+        cfg.shuffle_buffer_size = 1024  # to be tuned.
         return cfg
 
     def _process_example(self, example):

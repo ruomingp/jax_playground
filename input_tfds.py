@@ -33,15 +33,15 @@ class TfdsInput(Module):
             False,
             "Whether to download the examples. If false, use the local data under data_dir.",
         )
-        cfg.define("read_parallelism", 8, "The number of parallel calls for read data.")
+        cfg.define("read_parallelism", 1, "The number of parallel calls for read data.")
         cfg.define(
             "decode_parallelism",
-            8,
+            4,
             "The number of parallel calls for decoding examples.",
         )
         cfg.define(
             "process_parallelism",
-            1024,
+            4,
             "The number of parallel calls for processing examples.",
         )
         cfg.define(

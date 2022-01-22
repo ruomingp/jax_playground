@@ -115,6 +115,7 @@ def imagenet_trainer_config():
         evaler_cfg.input.set(
             is_training=False,
             global_batch_size=eval_batch_size,
+            prefetch_buffer_size=4,
             data_dir=FLAGS.data_dir,
         )
         evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
