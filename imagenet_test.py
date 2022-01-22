@@ -1,47 +1,12 @@
-"""A launcher to train ResNet-18 on ImageNet.
+"""A test program to reproduce a crash with tfds as_dataset().
 
 On the TPU VM:
-gs_bucket=permanent-us-central1-q5loch
-dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)a
-echo $dir
-data_dir=gs://${gs_bucket}/tensorflow_datasets
-echo $data_dir
-python3 imagenet.py --dir=$dir --data_dir=$data_dir 2>&1 | tee /tmp/log
-
-On your local machine:
-pip install tensorflow tbp-nightly
-gcloud auth application-default login
-tensorboard --logdir=$dir/summaries
+python3 imagenet_test.py 2>&1 | tee /tmp/log
 """
-import os.path
-
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import jax
-from absl import app, flags, logging
-from jax.experimental import maps
-from jax.experimental import mesh_utils
-
-flags.DEFINE_string(
-    "dir",
-    None,
-    "The root directory of the trainer. "
-    "Checkpoints will be stored in <dir>/checkpoints. "
-    "Summaries will be stored in <dir>/summaries.",
-    required=True,
-)
-flags.DEFINE_string(
-    "data_dir",
-    None,
-    "The tfds directory. If None, uses ~/tensorflow_datasets.",
-)
-flags.DEFINE_list(
-    "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
-)
-flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
-flags.DEFINE_bool("debug", False, "If true, run in the debug mode.")
-
-FLAGS = flags.FLAGS
+from absl import app
 
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
