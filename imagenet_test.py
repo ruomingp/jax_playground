@@ -51,37 +51,6 @@ flags.DEFINE_bool("debug", False, "If true, run in the debug mode.")
 FLAGS = flags.FLAGS
 
 
-def imagenet_trainer_input_config():
-    train_batch_size = 256
-
-    # Training inputs.
-    read_parallelism = 1
-    cfg = ImagenetInput.default_config().set(
-        name="imagenet_train_input",
-        split="train",
-        is_training=True,
-        global_batch_size=train_batch_size,
-        data_dir=FLAGS.data_dir,
-        read_parallelism=read_parallelism,
-        decode_parallelism=128,
-        process_parallelism=1024,
-        prefetch_buffer_size=64 * 1024,
-        shuffle_buffer_size=read_parallelism * 1024,
-    )
-    return cfg
-
-
-def main1(argv):
-    # Start jax.profiler for Tensorboard and profiling in open source.
-    if FLAGS.jax_profiler_port is not None:
-        server = jax.profiler.start_server(FLAGS.jax_profiler_port)
-
-    trainer_input_config = imagenet_trainer_input_config()
-    logging.info("Trainer config: %s", trainer_input_config.debug_string())
-    trainer_inputs = trainer_input_config.instantiate(parent=None)
-    # run_trainer(trainer_config, FLAGS.mesh_shape)
-
-
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 
