@@ -16,6 +16,7 @@ tensorboard --logdir=$dir/summaries
 import os.path
 
 import tensorflow as tf
+import tensorflow_datasets as tfds
 import jax
 from absl import app, flags, logging
 from jax.experimental import maps
@@ -70,7 +71,7 @@ def imagenet_trainer_input_config():
     return cfg
 
 
-def main(argv):
+def main1(argv):
     # Start jax.profiler for Tensorboard and profiling in open source.
     if FLAGS.jax_profiler_port is not None:
         server = jax.profiler.start_server(FLAGS.jax_profiler_port)
@@ -81,6 +82,33 @@ def main(argv):
     # run_trainer(trainer_config, FLAGS.mesh_shape)
 
 
+MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
+STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
+
+
+def _process_example(example):
+    image = example["image"]
+    image = tf.cast(tf.convert_to_tensor(image), tf.float32)
+    image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
+    image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
+    image = tf.image.resize([image], (224, 224), method=tf.image.ResizeMethod.BICUBIC)[0]
+    image = tf.image.random_flip_left_right(image)
+    return {"image": image, "label": example["label"]}
+
+
+def main(argv):
+    batch_size=256
+    builder = tfds.builder("imagenet2012", data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets")
+    split = tfds.even_splits("train", n=jax.process_count(), drop_remainder=True)[jax.process_index()]
+    read_config = tfds.ReadConfig(interleave_cycle_length=1, num_parallel_calls_for_interleave_files=1, num_parallel_calls_for_decode=128)
+    ds: tf.data.Dataset = builder.as_dataset(split=split, shuffle_files=True, read_config=read_config)
+    ds = ds.map(_process_example, num_parallel_calls=32)
+    ds = ds.shuffle(8192, reshuffle_each_iteration=True)
+    ds = ds.batch(batch_size, drop_remainder=True)
+    ds = ds.repeat()
+    ds = ds.prefetch(8192)
+    print(tfds.benchmark(ds, batch_size=batch_size, num_iter=100).stats)
+
+
 if __name__ == "__main__":
-    # tf.compat.v1.app.run(main)
     app.run(main)
