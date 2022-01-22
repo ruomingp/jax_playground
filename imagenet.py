@@ -2,7 +2,7 @@
 
 On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
-dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)a
+dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)b
 echo $dir
 data_dir=gs://${gs_bucket}/tensorflow_datasets
 echo $data_dir
@@ -45,7 +45,7 @@ flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
 )
 flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
-flags.DEFINE_bool("debug", False, "If true, run in the debug mode.")
+flags.DEFINE_integer("interval", None, "If not None, the number of steps between ckpt and eval.")
 
 FLAGS = flags.FLAGS
 
@@ -91,26 +91,26 @@ def imagenet_trainer_config():
     evaler_train = SpmdEvaler.default_config().set(
         name="eval_train",
         input=ImagenetInput.default_config().set(
-            split="train[:160]" if FLAGS.debug else "train[0:50000]"
+            split="train[:160]" if FLAGS.interval else "train[0:50000]"
         ),
     )
     evaler_validation = SpmdEvaler.default_config().set(
         name="eval_validation",
         input=ImagenetInput.default_config().set(
-            split="validation[:160]" if FLAGS.debug else "validation"
+            split="validation[:160]" if FLAGS.interval else "validation"
         ),
     )
     cfg.evalers = (evaler_train, evaler_validation)
 
     # Summaries and checkpoints.
     cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
-    cfg.checkpointer.write_every_n_steps = 10 if FLAGS.debug else steps_per_epoch
-    cfg.checkpointer.keep_every_n_steps = steps_per_epoch * 10
+    cfg.checkpointer.write_every_n_steps = FLAGS.interval or steps_per_epoch
+    cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
     summary_dir = os.path.join(FLAGS.dir, "summaries")
     cfg.summary_writer.write_every_n_steps = 100
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     for evaler_cfg in cfg.evalers:
-        evaler_cfg.run_every_n_steps = 10 if FLAGS.debug else steps_per_epoch
+        evaler_cfg.run_every_n_steps = FLAGS.interval or steps_per_epoch
         evaler_cfg.input.set(
             is_training=False,
             global_batch_size=eval_batch_size,
@@ -126,7 +126,7 @@ def run_trainer(trainer_config, mesh_shape):
     devices = mesh_utils.create_device_mesh(mesh_shape)
     mesh = maps.Mesh(devices, ("data", "model"))
     with maps.mesh(mesh.devices, mesh.axis_names):
-        trainer.run(prng_key, max_step=(100 if FLAGS.debug else 12000))
+        trainer.run(prng_key, max_step=(5004 * 2 if FLAGS.interval else 5004 * 90))
 
 
 def main(argv):

@@ -145,6 +145,7 @@ class SpmdTrainer(_SpmdRunner):
             num_steps = 0
             for input_batch in self.input:
                 prng_key, step_key = jax.random.split(prng_key)
+                logging.info("Start step %s", self.step + 1)
                 self._run_step(step_key, input_batch)
                 num_steps += 1
                 if num_steps % 100 == 0:
@@ -193,6 +194,7 @@ class SpmdTrainer(_SpmdRunner):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(train_key, self._state, input_batch)
             self._state = outputs["state"]
+        logging.info("train_step done: %s", self.step)
         if self._state.step % 100 == 0:
             logging.info(
                 "Process % 3d step % 8d: loss=%s aux=%s",
@@ -203,9 +205,11 @@ class SpmdTrainer(_SpmdRunner):
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
             )
+        logging.info("summary_writer: %s", self.step)
         self.summary_writer(
             self.step, {"loss": outputs["loss"], **outputs["summaries"]}
         )
+        logging.info("eval: %s", self.step)
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
@@ -215,6 +219,7 @@ class SpmdTrainer(_SpmdRunner):
                 model_params=self._state.model,
                 model_param_partition_spec=self._trainer_state_partition_specs.model,
             )
+        logging.info("checkpointer: %s", self.step)
         self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
@@ -292,6 +297,7 @@ class SpmdEvaler(_SpmdRunner):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
             return
+        logging.info("%s start at %s", self.path(), step)
         _jit_eval_batch = self._jit(
             partial(
                 F,
@@ -332,3 +338,4 @@ class SpmdEvaler(_SpmdRunner):
             summaries,
         )
         self.summary_writer(step, summaries)
+        logging.info("%s done at %s", self.path(), step)
