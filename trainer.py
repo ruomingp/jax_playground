@@ -110,7 +110,7 @@ class SpmdTrainer(_SpmdRunner):
             lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
         )
         # for path, spec in flatten_items(model_param_partition_specs):
-        #     logging.info("Model param partition: %s=%s", path, spec)
+        #     logging.debug("Model param partition: %s=%s", path, spec)
         logging.info("Model param partition: %s", model_param_partition_specs)
         learner_state_partition_specs = self.learner.create_state_partition_specs(
             model_param_partition_specs
@@ -147,7 +147,7 @@ class SpmdTrainer(_SpmdRunner):
             num_steps = 0
             for input_batch in self.input:
                 prng_key, step_key = jax.random.split(prng_key)
-                logging.info("Start step %s", self.step + 1)
+                logging.debug("Start step %s", self.step + 1)
                 self._run_step(step_key, input_batch)
                 num_steps += 1
                 if num_steps % 100 == 0:
@@ -196,7 +196,7 @@ class SpmdTrainer(_SpmdRunner):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(train_key, self._state, input_batch)
             self._state = outputs["state"]
-        logging.info("train_step done: %s", self.step)
+        logging.debug("train_step done: %s", self.step)
         if self._state.step % 100 == 0:
             logging.info(
                 "Process % 3d step % 8d: loss=%s aux=%s",
@@ -207,11 +207,11 @@ class SpmdTrainer(_SpmdRunner):
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
             )
-        logging.info("summary_writer: %s", self.step)
+        logging.debug("summary_writer: %s", self.step)
         self.summary_writer(
             self.step, {"loss": outputs["loss"], **outputs["summaries"]}
         )
-        logging.info("eval: %s", self.step)
+        logging.debug("eval: %s", self.step)
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
@@ -219,7 +219,7 @@ class SpmdTrainer(_SpmdRunner):
                 prng_key=eval_key,
                 model_params=self._state.model,
             )
-        logging.info("checkpointer: %s", self.step)
+        logging.debug("checkpointer: %s", self.step)
         self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
@@ -310,7 +310,7 @@ class SpmdEvaler(_SpmdRunner):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
             return
-        logging.info("%s start at %s", self.path(), step)
+        logging.debug("%s start at %s", self.path(), step)
         prng_key, init_key = jax.random.split(prng_key)
         metric_accumulator = cfg.metric_accumulator.instantiate()
         num_batches = 0
@@ -338,4 +338,4 @@ class SpmdEvaler(_SpmdRunner):
             summaries,
         )
         self.summary_writer(step, summaries)
-        logging.info("%s done at %s", self.path(), step)
+        logging.debug("%s done at %s", self.path(), step)
