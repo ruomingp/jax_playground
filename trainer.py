@@ -201,12 +201,12 @@ class SpmdTrainer(_SpmdRunner):
 
     def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
+        self.vlog(3, "  train_step: %s", self.step + 1)
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             prng_key, train_key = jax.random.split(prng_key)
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(train_key, self._state, input_batch)
             self._state = outputs["state"]
-        self.vlog(3, "train_step done: %s", self.step)
         if self._state.step % 100 == 0:
             self._step_log(
                 "loss=%s aux=%s",
@@ -215,11 +215,11 @@ class SpmdTrainer(_SpmdRunner):
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
             )
-        self.vlog(3, "summary_writer: %s", self.step)
+        self.vlog(3, "  summary_writer: %s", self.step)
         self.summary_writer(
             self.step, {"loss": outputs["loss"], **outputs["summaries"]}
         )
-        self.vlog(3, "eval: %s", self.step)
+        self.vlog(3, "  eval: %s", self.step)
         for evaler_cfg in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
@@ -227,7 +227,7 @@ class SpmdTrainer(_SpmdRunner):
                 prng_key=eval_key,
                 model_params=self._state.model,
             )
-        self.vlog(3, "checkpointer: %s", self.step)
+        self.vlog(3, "  checkpointer: %s", self.step)
         self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
