@@ -4,3 +4,4 @@ tfds-nightly  # As of Jan 15, 2022. Newer API for tfds.even_splits().
 tensorflow   # needed for tfds to work
 tbp-nightly  # https://jax.readthedocs.io/en/latest/profiling.html
 flax  # only for checkpoints
+guppy3  # for heap profiling
