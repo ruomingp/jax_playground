@@ -160,6 +160,7 @@ class SpmdTrainer(_SpmdRunner):
                 prng_key, step_key = jax.random.split(prng_key)
                 self.vlog(3, "Start step %s", self.step + 1)
                 self._run_step(step_key, input_batch)
+                self.vlog(3, "Done step %s", self.step)
                 num_steps += 1
                 if num_steps % 100 == 0:
                     now = time.perf_counter()
