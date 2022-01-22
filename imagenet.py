@@ -6,8 +6,7 @@ dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)b
 echo $dir
 data_dir=gs://${gs_bucket}/tensorflow_datasets
 echo $data_dir
-# python3 imagenet.py --dir=$dir --data_dir=$data_dir 2>&1 | gsutil cp - $dir/log-$(date +%F-%T)
-python3 imagenet.py --interval=1000 --dir=$dir --data_dir=$data_dir 2>&1 | tee /tmp/log | gsutil cp - $dir/log-$(date +%F-%T)
+python3 imagenet.py --dir=$dir --data_dir=$data_dir 2>&1 | tee /tmp/log | gsutil cp - $dir/log-$(date +%F-%T)
 
 On your local machine:
 pip install tensorflow tbp-nightly
@@ -111,7 +110,7 @@ def imagenet_trainer_config():
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     cfg.vlog = 0  # Set to 5 to enable verbose logging.
     for evaler_cfg in cfg.evalers:
-        evaler_cfg.vlog = 5
+        evaler_cfg.vlog = 0
         evaler_cfg.run_every_n_steps = FLAGS.interval or steps_per_epoch
         evaler_cfg.input.set(
             is_training=False,
