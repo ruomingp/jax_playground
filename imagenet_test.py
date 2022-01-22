@@ -3,10 +3,10 @@
 On the TPU VM:
 python3 imagenet_test.py 2>&1 | tee /tmp/log
 """
+from absl import app
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import jax
-from absl import app
 
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
