@@ -22,13 +22,6 @@ from absl import app, flags, logging
 from jax.experimental import maps
 from jax.experimental import mesh_utils
 
-import config as config_lib
-import learner
-import resnet
-import schedule
-from image import ImagenetInput
-from trainer import SpmdTrainer, SpmdEvaler
-
 flags.DEFINE_string(
     "dir",
     None,
