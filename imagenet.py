@@ -7,7 +7,7 @@ echo $dir
 data_dir=gs://${gs_bucket}/tensorflow_datasets
 echo $data_dir
 # python3 imagenet.py --dir=$dir --data_dir=$data_dir 2>&1 | gsutil cp - $dir/log-$(date +%F-%T)
-python3 imagenet.py --dir=$dir --data_dir=$data_dir 2>&1 | tee /tmp/log | gsutil cp - $dir/log-$(date +%F-%T)
+python3 imagenet.py --interval=1000 --dir=$dir --data_dir=$data_dir 2>&1 | tee /tmp/log | gsutil cp - $dir/log-$(date +%F-%T)
 
 On your local machine:
 pip install tensorflow tbp-nightly

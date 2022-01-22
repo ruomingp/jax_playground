@@ -168,7 +168,7 @@ class SpmdTrainer(_SpmdRunner):
                     self._step_log("Average step time: %s seconds", (now - start_time) / num_steps)
                     num_steps = 0
                     start_time = now
-                    self._step_log("Heap: %s", guppy.hpy().heap())
+                    print(guppy.hpy().heap())
                 if self.step >= max_step:
                     self._step_log("Reached max_step=%s. Stopping", max_step)
                     return
