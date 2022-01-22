@@ -108,7 +108,9 @@ def imagenet_trainer_config():
     summary_dir = os.path.join(FLAGS.dir, "summaries")
     cfg.summary_writer.write_every_n_steps = 100
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
+    cfg.vlog = 5
     for evaler_cfg in cfg.evalers:
+        evaler_cfg.vlog = 5
         evaler_cfg.run_every_n_steps = FLAGS.interval or steps_per_epoch
         evaler_cfg.input.set(
             is_training=False,

@@ -132,6 +132,7 @@ class Module(config_lib.Configurable):
     def default_config(cls):
         cfg = config_lib.InstantiableConfig(cls)
         cfg.define("name", "", "Name of this module.")
+        cfg.define("vlog", 0, "The maximum vlog level.")
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional["Module"]):
@@ -167,6 +168,10 @@ class Module(config_lib.Configurable):
 
     def __repr__(self):
         return f"{type(self)}@{self.path()}"
+
+    def vlog(self, level, msg, *args, **kwargs):
+        if level <= self.config.vlog:
+            logging.info(msg, *args, **kwargs)
 
     def _add_child(
         self, name: str, child_config: config_lib.Config, **kwargs
