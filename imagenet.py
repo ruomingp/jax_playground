@@ -80,10 +80,10 @@ def imagenet_trainer_config():
         global_batch_size=train_batch_size,
         data_dir=FLAGS.data_dir,
         read_parallelism=read_parallelism,
-        decode_parallelism=128,
-        process_parallelism=512,
-        prefetch_buffer_size=4 * 1024,
-        shuffle_buffer_size=max(4096, read_parallelism * 1024),
+        decode_parallelism=4,
+        process_parallelism=4,
+        prefetch_buffer_size=4,
+        shuffle_buffer_size=128,
     )
 
     # Evaluation.
