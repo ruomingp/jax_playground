@@ -19,7 +19,6 @@ from absl import app, flags, logging
 import jax  # jax must be imported before tensorflow!
 from jax.experimental import maps
 from jax.experimental import mesh_utils
-import tensorflow as tf
 
 import config as config_lib
 import learner

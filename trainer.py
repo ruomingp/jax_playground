@@ -129,6 +129,8 @@ class SpmdTrainer(_SpmdRunner):
             ),
             out_axis_resources=None,
         )
+        for evaler_cfg in cfg.evalers:
+            self._children[evaler_cfg.name].init(self.model, model_param_partition_specs)
 
     @property
     def step(self):
@@ -214,10 +216,8 @@ class SpmdTrainer(_SpmdRunner):
             prng_key, eval_key = jax.random.split(prng_key)
             self._children[evaler_cfg.name].run_step(
                 self.step,
-                eval_key,
-                model=self.model,
+                prng_key=eval_key,
                 model_params=self._state.model,
-                model_param_partition_spec=self._trainer_state_partition_specs.model,
             )
         logging.info("checkpointer: %s", self.step)
         self.checkpointer.save(step=self.step, state=self._state)
@@ -285,20 +285,8 @@ class SpmdEvaler(_SpmdRunner):
         )
         return cfg
 
-    def run_step(
-        self,
-        step: int,
-        prng_key: jax.random.KeyArray,
-        *,
-        model: Module,
-        model_params: NestedTensor,
-        model_param_partition_spec: NestedPartitionSpec,
-    ):
-        cfg = self.config
-        if step % cfg.run_every_n_steps != 0:
-            return
-        logging.info("%s start at %s", self.path(), step)
-        _jit_eval_batch = self._jit(
+    def init(self, model: Module, model_param_partition_spec: NestedPartitionSpec):
+        self._jit_eval_batch = self._jit(
             partial(
                 F,
                 model,
@@ -311,12 +299,24 @@ class SpmdEvaler(_SpmdRunner):
             ),
             out_axis_resources=None,
         )
+
+    def run_step(
+        self,
+        step: int,
+        *,
+        prng_key: jax.random.KeyArray,
+        model_params: NestedTensor,
+    ):
+        cfg = self.config
+        if step % cfg.run_every_n_steps != 0:
+            return
+        logging.info("%s start at %s", self.path(), step)
         prng_key, init_key = jax.random.split(prng_key)
         metric_accumulator = cfg.metric_accumulator.instantiate()
         num_batches = 0
         for input_batch in self.input:
             prng_key, batch_key = jax.random.split(prng_key)
-            (_, aux), output_collection = _jit_eval_batch(
+            (_, aux), output_collection = self._jit_eval_batch(
                 batch_key, model_params, input_batch
             )
             num_batches += 1
