@@ -7,7 +7,6 @@ from absl import logging
 from jax import numpy as jnp
 from jax.experimental import PartitionSpec
 from jax.experimental.pjit import pjit
-# import guppy
 
 import checkpointer
 import config as config_lib
@@ -168,7 +167,6 @@ class SpmdTrainer(_SpmdRunner):
                     self._step_log("Average step time: %s seconds", (now - start_time) / num_steps)
                     num_steps = 0
                     start_time = now
-                    # print(guppy.hpy().heap())
                 if self.step >= max_step:
                     self._step_log("Reached max_step=%s. Stopping", max_step)
                     return

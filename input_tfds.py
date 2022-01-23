@@ -51,7 +51,7 @@ class TfdsInput(Module):
         )
         cfg.define("shuffle_seed", None, "The shuffle seed.")
         cfg.define(
-            "prefetch_buffer_size", tf.data.AUTOTUNE, "The prefetch buffer size."
+            "prefetch_buffer_size", None, "The prefetch buffer size. If None, prefetch is disabled."
         )
         return cfg
 
@@ -105,11 +105,12 @@ class TfdsInput(Module):
                 seed=cfg.shuffle_seed,
                 reshuffle_each_iteration=True,
             )
-        # It is safe to drop remainder for eval because we verified that the dataset size is divisible by global_batch_size.
+        # It is safe to drop remainder for eval because the dataset size is divisible by global_batch_size.
         ds = ds.batch(batch_size, drop_remainder=True)
         if cfg.is_training:
             ds = ds.repeat()
-        ds = ds.prefetch(cfg.prefetch_buffer_size)
+        if cfg.prefetch_buffer_size is not None:
+            ds = ds.prefetch(cfg.prefetch_buffer_size)
         self._dataset = ds
 
     def _process_example(self, example):
