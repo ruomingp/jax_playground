@@ -107,7 +107,7 @@ def imagenet_trainer_config():
     cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
     summary_dir = os.path.join(FLAGS.dir, "summaries")
     cfg.summary_writer.write_every_n_steps = 100
-    cfg.summary_writer.print_heap = False
+    cfg.summary_writer.print_heap = True
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     cfg.vlog = 0  # Set to 5 to enable verbose logging.
     for evaler_cfg in cfg.evalers:
