@@ -128,6 +128,7 @@ class SpmdTrainer(_SpmdRunner):
                 self._input_sharding(),
             ),
             out_axis_resources=None,
+            donate_argnums=(0, 1, 2),
         )
         for evaler_cfg in cfg.evalers:
             self._children[evaler_cfg.name].init(self.model, model_param_partition_specs)
@@ -306,6 +307,7 @@ class SpmdEvaler(_SpmdRunner):
                 self._input_sharding(),
             ),
             out_axis_resources=None,
+            donate_argnums=(0, 1, 2),
         )
 
     def run_step(
