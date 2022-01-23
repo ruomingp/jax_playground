@@ -57,5 +57,7 @@ class SummaryWriter(Module):
             self.summary_writer.flush()
 
         if cfg.print_heap:
-            h = guppy.hpy()
-            print(h.heap())
+            heap = guppy.hpy().heap()
+            print(heap[0])
+            print(heap[1])
+            print(heap[2])
