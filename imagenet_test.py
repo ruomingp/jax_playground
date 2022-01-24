@@ -3,7 +3,7 @@
 On the TPU VM:
 python3 imagenet_test.py 2>&1 | tee /tmp/log
 """
-from absl import app
+from absl import app, logging
 import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -35,8 +35,8 @@ def main(argv):
     ds = ds.batch(batch_size, drop_remainder=True)
     ds = ds.repeat()
     ds = ds.prefetch(8192)
-    for batch in ds:
-        print(utils.shapes(batch))
+    for i, batch in enumerate(ds):
+        logging.info(f"Batch {i}: {utils.shapes(batch)}")
 
 
 if __name__ == "__main__":
