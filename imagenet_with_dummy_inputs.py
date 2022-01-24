@@ -4,9 +4,7 @@ On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
 dir=gs://${gs_bucket}/${USER}/experiments/imagenet-dummy-inputs
 echo $dir
-data_dir=gs://${gs_bucket}/tensorflow_datasets
-echo $data_dir
-python3 imagenet_with_dummy_inputs.py --dir=$dir --data_dir=$data_dir 2>&1 | tee /tmp/log
+python3 imagenet_with_dummy_inputs.py --dir=$dir 2>&1 | tee /tmp/log
 
 On your local machine:
 pip install tensorflow tbp-nightly
