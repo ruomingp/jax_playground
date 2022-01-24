@@ -24,7 +24,6 @@ import learner
 import resnet
 import schedule
 from module import Module
-from image import ImagenetInput
 from trainer import SpmdTrainer, SpmdEvaler
 
 flags.DEFINE_string(
