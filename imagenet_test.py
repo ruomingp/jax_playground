@@ -4,9 +4,9 @@ On the TPU VM:
 python3 imagenet_test.py 2>&1 | tee /tmp/log
 """
 from absl import app, logging
-import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
+import guppy
 
 import utils
 
@@ -27,7 +27,7 @@ def _process_example(example):
 def main(argv):
     batch_size=256
     builder = tfds.builder("imagenet2012", data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets")
-    split = tfds.even_splits("train", n=jax.process_count(), drop_remainder=True)[jax.process_index()]
+    split = "train"
     read_config = tfds.ReadConfig(interleave_cycle_length=1, num_parallel_calls_for_interleave_files=1, num_parallel_calls_for_decode=128)
     ds: tf.data.Dataset = builder.as_dataset(split=split, shuffle_files=True, read_config=read_config)
     ds = ds.map(_process_example, num_parallel_calls=32)
@@ -37,6 +37,10 @@ def main(argv):
     ds = ds.prefetch(8192)
     for i, batch in enumerate(ds):
         logging.info(f"Batch {i}: {utils.shapes(batch)}")
+        if i % 100 == 0:
+            h = guppy.hpy()
+            print(h.heap())
+
 
 
 if __name__ == "__main__":
