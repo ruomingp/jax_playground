@@ -57,6 +57,7 @@ class SummaryWriter(Module):
             self.summary_writer.flush()
 
         if cfg.print_heap:
+            logging.info("Collecting heap profile.")
             heap = guppy.hpy().heap()
             print(heap[0])
             print(heap[1])
