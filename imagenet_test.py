@@ -8,6 +8,7 @@ import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
+import utils
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
@@ -34,7 +35,8 @@ def main(argv):
     ds = ds.batch(batch_size, drop_remainder=True)
     ds = ds.repeat()
     ds = ds.prefetch(8192)
-    print(tfds.benchmark(ds, batch_size=batch_size, num_iter=100).stats)
+    for batch in ds:
+        print(utils.shapes(batch))
 
 
 if __name__ == "__main__":
