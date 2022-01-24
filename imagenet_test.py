@@ -37,7 +37,7 @@ def main(argv):
     ds = ds.prefetch(4)
     for i, batch in enumerate(ds):
         logging.info(f"Batch {i}: {utils.shapes(batch)}")
-        if i % 100 == 0:
+        if i % 100 == 101:
             h = guppy.hpy()
             logging.info("Heapy: %s", h.heap())
 
