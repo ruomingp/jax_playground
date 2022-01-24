@@ -28,18 +28,18 @@ def main(argv):
     batch_size=256
     builder = tfds.builder("imagenet2012", data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets")
     split = "train"
-    read_config = tfds.ReadConfig(interleave_cycle_length=1, num_parallel_calls_for_interleave_files=1, num_parallel_calls_for_decode=128)
+    read_config = tfds.ReadConfig(interleave_cycle_length=1, num_parallel_calls_for_interleave_files=1, num_parallel_calls_for_decode=4)
     ds: tf.data.Dataset = builder.as_dataset(split=split, shuffle_files=True, read_config=read_config)
-    ds = ds.map(_process_example, num_parallel_calls=32)
-    ds = ds.shuffle(8192, reshuffle_each_iteration=True)
+    ds = ds.map(_process_example, num_parallel_calls=64)
+    ds = ds.shuffle(1024, reshuffle_each_iteration=True)
     ds = ds.batch(batch_size, drop_remainder=True)
     ds = ds.repeat()
-    ds = ds.prefetch(8192)
+    ds = ds.prefetch(4)
     for i, batch in enumerate(ds):
         logging.info(f"Batch {i}: {utils.shapes(batch)}")
         if i % 100 == 0:
             h = guppy.hpy()
-            print(h.heap())
+            logging.info("Heapy: %s", h.heap())
 
 
 

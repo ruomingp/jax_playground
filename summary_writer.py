@@ -58,5 +58,5 @@ class SummaryWriter(Module):
 
         if cfg.print_heap:
             logging.info("Collecting heap profile.")
-            heap = guppy.hpy().heap()
-            print(heap)
+            h = guppy.hpy()
+            logging.info("Heapy: %s", h.heap())
