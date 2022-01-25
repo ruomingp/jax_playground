@@ -4,7 +4,7 @@ On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
 dir=gs://${gs_bucket}/${USER}/experiments/imagenet-dummy-inputs
 echo $dir
-python3 imagenet_with_dummy_inputs.py --dir=$dir 2>&1 | tee /tmp/log
+python3 imagenet_with_dummy_inputs.py --dir=$dir --interval=1000000 2>&1 | tee /tmp/log
 
 On your local machine:
 pip install tensorflow tbp-nightly
@@ -122,15 +122,15 @@ def imagenet_trainer_config():
             total_num_batches=160 if FLAGS.interval else 50000
         ),
     )
-    cfg.evalers = (evaler_train,)
+    # cfg.evalers = (evaler_train,)
+    cfg.evalers = []
 
     # Summaries and checkpoints.
     cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
     cfg.checkpointer.write_every_n_steps = FLAGS.interval or steps_per_epoch
     cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
     summary_dir = os.path.join(FLAGS.dir, "summaries")
-    cfg.summary_writer.write_every_n_steps = 100
-    cfg.summary_writer.print_heap = False
+    cfg.summary_writer.write_every_n_steps = FLAGS.interval
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     cfg.vlog = 0  # Set to 5 to enable verbose logging.
     for evaler_cfg in cfg.evalers:
@@ -144,7 +144,7 @@ def imagenet_trainer_config():
 def run_trainer(trainer_config, mesh_shape):
     trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
     prng_key = jax.random.PRNGKey(1)
-    run = lambda: trainer.run(prng_key, max_step=(5004 * 2 if FLAGS.interval else 5004 * 90))
+    run = lambda: trainer.run(prng_key, max_step=(FLAGS.interval * 10 if FLAGS.interval else 5004 * 90))
     if mesh_shape:
         devices = mesh_utils.create_device_mesh(mesh_shape)
         mesh = maps.Mesh(devices, ("data", "model"))
