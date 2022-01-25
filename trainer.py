@@ -150,6 +150,7 @@ class SpmdTrainer(_SpmdRunner):
 
     def run(self, prng_key: jax.random.KeyArray, max_step: int):
         cfg = self.config
+        jax.config.update('jax_log_compiles', True)
         self._step_log("Starting run up to step %s", max_step)
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
@@ -208,7 +209,7 @@ class SpmdTrainer(_SpmdRunner):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(train_key, self._state, input_batch)
             self._state = outputs["state"]
-        if self._state.step % 100 == 0:
+        if self._state.step % 1 == 0:
             self._step_log(
                 "loss=%s aux=%s",
                 outputs["loss"],

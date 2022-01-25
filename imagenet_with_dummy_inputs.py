@@ -144,10 +144,14 @@ def imagenet_trainer_config():
 def run_trainer(trainer_config, mesh_shape):
     trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
     prng_key = jax.random.PRNGKey(1)
-    devices = mesh_utils.create_device_mesh(mesh_shape)
-    mesh = maps.Mesh(devices, ("data", "model"))
-    with maps.mesh(mesh.devices, mesh.axis_names):
-        trainer.run(prng_key, max_step=(5004 * 2 if FLAGS.interval else 5004 * 90))
+    run = lambda: trainer.run(prng_key, max_step=(5004 * 2 if FLAGS.interval else 5004 * 90))
+    if mesh_shape:
+        devices = mesh_utils.create_device_mesh(mesh_shape)
+        mesh = maps.Mesh(devices, ("data", "model"))
+        with maps.mesh(mesh.devices, mesh.axis_names):
+            run()
+    else:
+        run()
 
 
 def main(argv):
