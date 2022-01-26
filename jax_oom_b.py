@@ -94,8 +94,8 @@ class DummyModel(BaseLayer):
 
     def parameter_partition_specs(self) -> NestedPartitionSpec:
         return {
-            'scale': [],
-            'bias': [],
+            'scale': PartitionSpec([]),
+            'bias': PartitionSpec([]),
         }
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
