@@ -5,10 +5,10 @@ gs_bucket=permanent-us-central1-q5loch
 exp=$(date +%F-%H-%M)
 dir=gs://${gs_bucket}/${USER}/experiments/imagenet-dummy-inputs.${exp}
 echo $dir
-python3 jax_oom_test.py --dir=$dir --interval=1000000 2>&1 | tee log.${exp}
+python3 jax_oom_test.py --dir=$dir 2>&1 | tee log.${exp}
 """
 
-from typing import Any, Callable, Dict, NamedTuple, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 
 import jax
 import numpy as np
@@ -21,10 +21,12 @@ from jax.experimental import maps
 from jax.experimental import mesh_utils
 from jax.experimental.pjit import pjit
 
-import learner
-from module import Module, ParameterSpec
-from module import NestedTensor, NestedPartitionSpec
-from utils import Tensor, tree_paths
+Tensor = jnp.ndarray
+# Recursive type annotations not supported by pytype yet.
+NestedTree = Union[Any, Dict[str, Any]]  # Union[Any, Dict[str, "NestedTree"]]
+NestedTensor = Union[Tensor, Dict[str, Any]]  # Union[Tensor, Dict[str, "NestedTensor"]]
+NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, Any]]]
+
 
 flags.DEFINE_string(
     "dir",
@@ -38,12 +40,33 @@ flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
 )
 flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
-flags.DEFINE_integer("interval", None, "If not None, the number of steps between ckpt and eval.")
 
 FLAGS = flags.FLAGS
 
 
-class DummyInput(Module):
+TransformPartitionSpecFn = Callable[[NestedPartitionSpec], NestedPartitionSpec]
+
+class PartitionedGradientTransformation(NamedTuple):
+    init: optax.TransformInitFn
+    update: optax.TransformUpdateFn
+    partition: TransformPartitionSpecFn
+
+
+def no_op_optimizer() -> PartitionedGradientTransformation:
+    def no_op_update(updates, state, params):
+        logging.info("no_op_update: g=%s s=%s p=%s", updates, state, params)
+        updates = jax.tree_map(lambda x: jnp.zeros_like(x), params)
+        logging.info("no_op_update: u=%s", updates)
+        return updates, state
+
+    return PartitionedGradientTransformation(
+        init=lambda x: {},
+        update=no_op_update,
+        partition=lambda x: {},
+    )
+
+
+class DummyInput:
 
     def __init__(self):
         self._prng_key = jax.random.PRNGKey(1)
@@ -71,12 +94,12 @@ class DummyInput(Module):
         )
 
 
-class DummyModel():
+class DummyModel:
 
-    def create_parameter_specs_recursively(self) -> Dict[str, ParameterSpec]:
+    def parameter_partition_specs(self) -> NestedPartitionSpec:
         return {
-            'scale': ParameterSpec(shape=[], partition_spec=[]),
-            'bias': ParameterSpec(shape=[], partition_spec=[]),
+            'scale': [],
+            'bias': [],
         }
 
     def initialize_parameters_recursively(self) -> NestedTensor:
@@ -95,7 +118,7 @@ class DummyModel():
 class _TrainerState(NamedTuple):
     step: Union[Tensor, NestedPartitionSpec]
     model: Union[NestedTensor, NestedPartitionSpec]
-    learner: Union[learner.LearnerState, NestedPartitionSpec]
+    learner: Union[NestedTensor, NestedPartitionSpec]
 
 
 class Trainer:
@@ -106,16 +129,12 @@ class Trainer:
         self.optimizer = no_op_optimizer()
         self._state = None
 
-        self._model_param_specs = self.model.create_parameter_specs_recursively()
-        model_param_partition_specs = jax.tree_map(
-            lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
-        )
+        model_param_partition_specs = self.model.parameter_partition_specs()
         self._step_log("Model param partition: %s", model_param_partition_specs)
-        learner_state_partition_specs = None
         self._trainer_state_partition_specs = _TrainerState(
             step=None,
             model=model_param_partition_specs,
-            learner=learner_state_partition_specs,
+            learner=None,
         )
         self._jit_train_step = self._jit(
             self._train_step,
@@ -167,10 +186,6 @@ class Trainer:
         )
         self._step_log("Initializing states")
         self._state = init_computation()
-        flat_paths, _ = jax.tree_flatten(tree_paths(self._state))
-        flat_values, _ = jax.tree_flatten(self._state)
-        for path, value in zip(flat_paths, flat_values):
-            self._step_log("State: %s=%s(%s)", path, value.dtype, value.shape)
 
     def _run_step(self, input_batch: Any):
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
@@ -215,20 +230,6 @@ class Trainer:
             )
             fn = jax.jit(fn, **kwargs)
         return fn
-
-
-def no_op_optimizer() -> learner.PartitionedGradientTransformation:
-    def no_op_update(updates, state, params):
-        logging.info("no_op_update: g=%s s=%s p=%s", updates, state, params)
-        updates = jax.tree_map(lambda x: jnp.zeros_like(x), params)
-        logging.info("no_op_update: u=%s", updates)
-        return updates, state
-
-    return learner.PartitionedGradientTransformation(
-        init=lambda x: {},
-        update=no_op_update,
-        partition=lambda x: {},
-    )
 
 
 def run_trainer(mesh_shape):
