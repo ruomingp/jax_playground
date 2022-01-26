@@ -120,12 +120,11 @@ class Trainer:
         self._jit_train_step = self._jit(
             self._train_step,
             in_axis_resources=(
-                None,  # prng_key
                 self._trainer_state_partition_specs,
                 PartitionSpec("data"),
             ),
             out_axis_resources=None,
-            donate_argnums=(0, 1, 2),
+            donate_argnums=(0, 1),
         )
 
     @property
@@ -204,9 +203,9 @@ class Trainer:
         )
         return loss, updated_state
 
-    def _jit(self, fn: Callable, **kwargs):
+    def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
         if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
-            fn = pjit(fn, **kwargs)
+            fn = pjit(fn, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources, **kwargs)
         else:
             logging.log_first_n(
                 logging.INFO,
@@ -214,7 +213,7 @@ class Trainer:
                 1,
                 [device.platform for device in jax.devices()],
             )
-            fn = jax.jit(fn)
+            fn = jax.jit(fn, **kwargs)
         return fn
 
 

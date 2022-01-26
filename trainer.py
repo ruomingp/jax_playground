@@ -62,7 +62,7 @@ class _SpmdRunner(Module):
                 1,
                 [device.platform for device in jax.devices()],
             )
-            fn = jax.jit(fn)
+            fn = jax.jit(fn, **kwargs)
         self.vlog(3, "Compiling computation done")
         return fn
 
