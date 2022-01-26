@@ -4,7 +4,7 @@ On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
 dir=gs://${gs_bucket}/${USER}/experiments/imagenet-dummy-inputs
 echo $dir
-python3 imagenet_with_dummy_inputs.py --dir=$dir --interval=1000000 2>&1 | tee /tmp/log
+python3 imagenet_with_dummy_inputs.py --dir=$dir --interval=1000000 2>&1 | tee log
 
 On your local machine:
 pip install tensorflow tbp-nightly
@@ -97,7 +97,7 @@ def imagenet_trainer_config():
     cfg.name = "imagenet_trainer"
 
     # Model and optimization.
-    cfg.model = resnet.ResNetModel.resnet18_config()
+    cfg.model = resnet.ResNetModel.default_config().set(num_blocks_per_stage=[])
     learning_rate = config_lib.config_for_function(schedule.stepwise).set(
         sub=[0.1, 0.01, 0.001],
         start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
@@ -130,7 +130,7 @@ def imagenet_trainer_config():
     cfg.checkpointer.write_every_n_steps = FLAGS.interval or steps_per_epoch
     cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
     summary_dir = os.path.join(FLAGS.dir, "summaries")
-    cfg.summary_writer.write_every_n_steps = FLAGS.interval
+    cfg.summary_writer.write_every_n_steps = FLAGS.interval or 100
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     cfg.vlog = 0  # Set to 5 to enable verbose logging.
     for evaler_cfg in cfg.evalers:
