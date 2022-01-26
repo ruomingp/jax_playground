@@ -160,7 +160,7 @@ class Trainer:
         self._trainer_state_partition_specs = _TrainerState(
             step=None,
             model=model_param_partition_specs,
-            learner=None,
+            learner={},
         )
         self._jit_train_step = self._jit(
             self._train_step,
