@@ -51,10 +51,10 @@ class _SpmdRunner(Module):
         self._state = None
         self._jit_compute = None
 
-    def _jit(self, fn: Callable, **kwargs):
+    def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
         self.vlog(3, "Compiling computation %s", fn)
         if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
-            fn = pjit(fn, **kwargs)
+            fn = pjit(fn, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources, **kwargs)
         else:
             logging.log_first_n(
                 logging.INFO,

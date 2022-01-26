@@ -89,7 +89,7 @@ class DummyModel():
         x = image.mean(axis=(1, 2, 3))
         x = x * state['scale'] + state['bias']
         loss = jnp.abs(x - label.astype(x.dtype)).mean()
-        return loss
+        return loss, {}
 
 
 class _TrainerState(NamedTuple):
@@ -175,8 +175,8 @@ class Trainer:
     def _run_step(self, input_batch: Any):
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
-            loss, self._state = self._jit_train_step(self._state, input_batch)
-        self._step_log("loss=%s", loss)
+            output, self._state = self._jit_train_step(self._state, input_batch)
+        self._step_log("output=%s", output)
 
     def _train_step(
             self,
@@ -189,8 +189,8 @@ class Trainer:
                 **forward_input_batch,
             )
 
-        _forward_and_grad = jax.value_and_grad(_forward, has_aux=False)
-        loss, grads = _forward_and_grad(
+        _forward_and_grad = jax.value_and_grad(_forward, has_aux=True)
+        (loss, aux), grads = _forward_and_grad(
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
@@ -201,7 +201,7 @@ class Trainer:
             model=updated_model,
             learner=updated_learner_state
         )
-        return loss, updated_state
+        return (loss, aux), updated_state
 
     def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
         if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
