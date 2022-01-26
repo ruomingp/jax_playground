@@ -98,9 +98,9 @@ class DummyModel(BaseLayer):
         }
 
     def initialize_parameters_recursively(
-        self,
-        prng_key: jax.random.KeyArray,
-        param_specs: Optional[NestedParameterSpec] = None,
+            self,
+            prng_key: jax.random.KeyArray,
+            param_specs: Optional[NestedParameterSpec] = None,
     ) -> NestedTensor:
         return {
             'scale': jnp.ones(shape=[], dtype=jnp.float32),
@@ -112,6 +112,20 @@ class DummyModel(BaseLayer):
         x = x * self.state['scale'] + self.state['bias']
         loss = jnp.abs(x - label.astype(x.dtype)).mean()
         return loss, {}
+
+
+def no_op_optimizer() -> learner.PartitionedGradientTransformation:
+    def no_op_update(updates, state, params):
+        logging.info("no_op_update: g=%s s=%s p=%s", updates, state, params)
+        updates = jax.tree_map(lambda x: jnp.zeros_like(x), params)
+        logging.info("no_op_update: u=%s", updates)
+        return updates, state
+
+    return learner.PartitionedGradientTransformation(
+        init=lambda x: {},
+        update=no_op_update,
+        partition=lambda x: {},
+    )
 
 
 def imagenet_trainer_config():
@@ -126,31 +140,13 @@ def imagenet_trainer_config():
     # Model and optimization.
     cfg.model = DummyModel.default_config().set(dtype=jnp.float32,
                                                 param_init=param_init.DefaultInitializer.default_config())
-    learning_rate = config_lib.config_for_function(schedule.stepwise).set(
-        sub=[0.1, 0.01, 0.001],
-        start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
-    )
     cfg.learner = learner.Learner.default_config().set(
-        optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
-            learning_rate=learning_rate,
-            momentum=0.9,
-            weight_decay=1e-4,
-        ),
-    )
+        optimizer=config_lib.config_for_function(no_op_optimizer))
 
     # Training inputs.
     cfg.input = DummyInput.default_config().set(
         global_batch_size=train_batch_size,
     )
-
-    # Evaluation.
-    evaler_train = SpmdEvaler.default_config().set(
-        name="eval_train",
-        input=DummyInput.default_config().set(
-            total_num_batches=160 if FLAGS.interval else 50000
-        ),
-    )
-    # cfg.evalers = (evaler_train,)
     cfg.evalers = []
 
     # Summaries and checkpoints.
@@ -161,11 +157,6 @@ def imagenet_trainer_config():
     cfg.summary_writer.write_every_n_steps = FLAGS.interval or 100
     cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     cfg.vlog = 0  # Set to 5 to enable verbose logging.
-    for evaler_cfg in cfg.evalers:
-        evaler_cfg.vlog = 0
-        evaler_cfg.run_every_n_steps = FLAGS.interval or steps_per_epoch
-        evaler_cfg.input.set(global_batch_size=eval_batch_size)
-        evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
     return cfg
 
 

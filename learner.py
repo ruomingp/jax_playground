@@ -1,11 +1,13 @@
 """Optimization modules."""
 import copy
-from typing import Callable, NamedTuple, Tuple, Union
+from typing import Callable, NamedTuple
 
 import optax
+from absl import logging
 
 import config as config_lib
 import schedule
+import utils
 from module import Module, NestedTensor, NestedPartitionSpec, Tensor, current_context
 
 TransformPartitionSpecFn = Callable[[NestedPartitionSpec], NestedPartitionSpec]
@@ -122,5 +124,6 @@ class Learner(Module):
             gradients, state=self.state.optimizer, params=model_params
         )
         self.add_state_update("optimizer", optimizer_state)
+        logging.info("model_params=%s updates=%s", model_params, parameter_updates)
         updated_model_params = optax.apply_updates(model_params, parameter_updates)
         return updated_model_params
