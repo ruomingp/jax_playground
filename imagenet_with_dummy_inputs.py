@@ -2,14 +2,10 @@
 
 On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
-dir=gs://${gs_bucket}/${USER}/experiments/imagenet-dummy-inputs
+exp=$(date +%F-%H-%M)
+dir=gs://${gs_bucket}/${USER}/experiments/imagenet-dummy-inputs.${exp}
 echo $dir
-python3 imagenet_with_dummy_inputs.py --dir=$dir --interval=1000000 2>&1 | tee log
-
-On your local machine:
-pip install tensorflow tbp-nightly
-gcloud auth application-default login
-tensorboard --logdir=$dir/summaries
+python3 imagenet_with_dummy_inputs.py --dir=$dir --interval=1000000 2>&1 | tee log.${exp}
 """
 import os.path
 from typing import Dict, Optional
