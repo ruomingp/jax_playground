@@ -1,21 +1,15 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-gs_bucket=permanent-us-central1-q5loch
-exp=$(date +%F-%H-%M)
-dir=gs://${gs_bucket}/${USER}/experiments/jax_oom_a
-echo $dir
-python3 jax_oom_a.py --dir=$dir 2>&1 | tee log.${exp}
-
-This program shows a slow but persistent increase in memory usage (~30GB/hour).
+python3 jax_oom_c.py --dir=./jax_oom_c 2>&1 | tee ./jax_oom_c/log
 """
-import os.path
+import time
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 
-import jax  # jax must be imported before tensorflow!
+import jax
 import numpy as np
-import optax
-from absl import app, flags, logging
+from absl import app, flags
+from absl import logging
 from jax import numpy as jnp
 from jax.experimental import PartitionSpec
 from jax.experimental import maps
@@ -25,15 +19,9 @@ from jax.experimental.pjit import pjit
 import config as config_lib
 import learner
 import param_init
-from module import BaseLayer, Module, NestedParameterSpec, ParameterSpec
-from trainer import SpmdTrainer
-
-Tensor = jnp.ndarray
-# Recursive type annotations not supported by pytype yet.
-NestedTree = Union[Any, Dict[str, Any]]  # Union[Any, Dict[str, "NestedTree"]]
-NestedTensor = Union[Tensor, Dict[str, Any]]  # Union[Tensor, Dict[str, "NestedTensor"]]
-NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, Any]]]
-
+from module import BaseLayer, NestedParameterSpec, ParameterSpec
+from module import functional as F, Module, NestedTensor, NestedPartitionSpec
+from utils import Tensor, tree_paths
 
 flags.DEFINE_string(
     "dir",
@@ -94,12 +82,6 @@ class DummyInput(Module):
 
 class DummyModel(BaseLayer):
 
-    def parameter_partition_specs(self) -> NestedPartitionSpec:
-        return {
-            'scale': PartitionSpec(),
-            'bias': PartitionSpec(),
-        }
-
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         return {
             'scale': ParameterSpec(shape=[], partition_spec=[]),
@@ -116,13 +98,7 @@ class DummyModel(BaseLayer):
             'bias': jnp.zeros(shape=[], dtype=jnp.float32),
         }
 
-    def forward(self, state: NestedTensor, image: Tensor, label: Tensor):
-        x = image.mean(axis=(1, 2, 3))
-        x = x * state['scale'] + state['bias']
-        loss = jnp.abs(x - label.astype(x.dtype)).mean()
-        return loss, {}
-
-    def forward0(self, image: Tensor, label: Tensor):
+    def forward(self, image: Tensor, label: Tensor):
         x = image.mean(axis=(1, 2, 3))
         x = x * self.state['scale'] + self.state['bias']
         loss = jnp.abs(x - label.astype(x.dtype)).mean()
@@ -143,35 +119,66 @@ def no_op_optimizer() -> learner.PartitionedGradientTransformation:
     )
 
 
+def _apply_updates(base, updates):
+    if isinstance(updates, jnp.ndarray):
+        assert isinstance(base, jnp.ndarray), base
+        return updates
+    for k, v in updates.items():
+        if k not in base:
+            base[k] = v
+        else:
+            base[k] = _apply_updates(base[k], v)
+    return base
+
+
 class _TrainerState(NamedTuple):
     step: Union[Tensor, NestedPartitionSpec]
     model: Union[NestedTensor, NestedPartitionSpec]
-    learner: Union[NestedTensor, NestedPartitionSpec]
+    learner: Union[learner.LearnerState, NestedPartitionSpec]
 
 
-class Trainer:
+class SpmdTrainer(Module):
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define("input", None, "The model input config.")
+        cfg.define("model", None, "The model config.")
+        cfg.define("learner", None, "The learner config.")
+        return cfg
 
-    def __init__(self, input_config, model_config):
-        self.input = input_config.set(name="input").instantiate(parent=None)
-        self.model = model_config.set(name="model").instantiate(parent=None)
-        self.optimizer = no_op_optimizer()
+    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
+        super().__init__(cfg, parent=parent)
+        cfg = self.config
+        self._add_child("input", cfg.input)
+        self._add_child("model", cfg.model)
+        self._add_child("learner", cfg.learner)
         self._state = None
+        self._jit_compute = None
 
-        model_param_partition_specs = self.model.parameter_partition_specs()
+        self._model_param_specs = self.model.create_parameter_specs_recursively()
+        self.vlog(3, "Model param specs: %s", self._model_param_specs)
+        model_param_partition_specs = jax.tree_map(
+            lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
+        )
+        # for path, spec in flatten_items(model_param_partition_specs):
+        #     self.vlog(3, "Model param partition: %s=%s", path, spec)
         self._step_log("Model param partition: %s", model_param_partition_specs)
+        learner_state_partition_specs = self.learner.create_state_partition_specs(
+            model_param_partition_specs
+        )
         self._trainer_state_partition_specs = _TrainerState(
             step=None,
             model=model_param_partition_specs,
-            learner={},
+            learner=learner_state_partition_specs,
         )
         self._jit_train_step = self._jit(
             self._train_step,
             in_axis_resources=(
+                None,  # prng_key
                 self._trainer_state_partition_specs,
-                PartitionSpec("data"),
-            ),
+                PartitionSpec("data")),
             out_axis_resources=None,
-            donate_argnums=(0, 1),
+            donate_argnums=(0, 1, 2),
         )
 
     @property
@@ -182,25 +189,45 @@ class Trainer:
 
     def _step_log(self, msg, *args, **kwargs):
         logging.info(
-            "process % 3d step % 8d] " + msg,
+            "%s process % 3d step % 8d] " + msg,
+            self.path(),
             jax.process_index(),
             self.step,
             *args,
             **kwargs)
 
     def run(self, prng_key: jax.random.KeyArray, max_step: int):
+        cfg = self.config
         jax.config.update('jax_log_compiles', True)
         self._step_log("Starting run up to step %s", max_step)
-        self._init(prng_key)
+        prng_key, init_key = jax.random.split(prng_key)
+        self._init(init_key)
 
         with jax.profiler.trace(FLAGS.dir):
+            start_time = time.perf_counter()
+            num_steps = 0
             for input_batch in self.input:
-                self._run_step(input_batch)
+                prng_key, step_key = jax.random.split(prng_key)
+                self.vlog(3, "Start step %s", self.step + 1)
+                self._run_step(step_key, input_batch)
+                self.vlog(3, "Done step %s", self.step)
+                num_steps += 1
+                if num_steps % 100 == 0:
+                    now = time.perf_counter()
+                    self._step_log("Average step time: %s seconds", (now - start_time) / num_steps)
+                    num_steps = 0
+                    start_time = now
+                if self.step >= max_step:
+                    self._step_log("Reached max_step=%s. Stopping", max_step)
+                    return
+            self._step_log("Reached end of inputs. Stopping")
 
-    def _init(self, prng_key):
-        def _init_state(prng_key):
-            model_params = self.model.initialize_parameters_recursively(prng_key)
-            learner_params = self.optimizer.init(model_params)
+    def _init(self, prng_key: jax.random.KeyArray):
+        def _init_state(prng_key: jax.random.KeyArray):
+            model_params = self.model.initialize_parameters_recursively(
+                prng_key, self._model_param_specs
+            )
+            learner_params = self.learner.init(model_params)
             return _TrainerState(
                 step=jnp.zeros([], dtype=jnp.int64),
                 model=model_params,
@@ -209,44 +236,85 @@ class Trainer:
 
         init_computation = self._jit(
             _init_state,
-            in_axis_resources=[None],
+            in_axis_resources=(None,),
             out_axis_resources=self._trainer_state_partition_specs,
         )
         self._step_log("Initializing states")
         self._state = init_computation(prng_key)
+        flat_paths, _ = jax.tree_flatten(tree_paths(self._state))
+        flat_values, _ = jax.tree_flatten(self._state)
+        for path, value in zip(flat_paths, flat_values):
+            self._step_log("State: %s=%s(%s)", path, value.dtype, value.shape)
 
-    def _run_step(self, input_batch: Any):
+    def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
+        cfg = self.config
+        self.vlog(3, "  train_step: %s", self.step + 1)
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
+            prng_key, train_key = jax.random.split(prng_key)
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
-            output, self._state = self._jit_train_step(self._state, input_batch)
-        self._step_log("output=%s", output)
+            outputs = self._jit_train_step(train_key, self._state, input_batch)
+            self._state = outputs["state"]
+        if self._state.step % 1 == 0:
+            self._step_log(
+                "loss=%s aux=%s",
+                outputs["loss"],
+                jax.tree_map(
+                    lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
+                ),
+            )
 
     def _train_step(
             self,
+            prng_key: jax.random.KeyArray,
             state: _TrainerState,
             input_batch: Dict[str, Any],
     ):
+        prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
+
         def _forward(model_parameters, forward_input_batch):
-            return self.model.forward(
+            (loss, aux), model_output_collection = F(
+                self.model,
                 state=model_parameters,
-                **forward_input_batch,
+                is_training=True,
+                prng_key=forward_key,
+                inputs=forward_input_batch,
             )
+            return loss, (aux, model_output_collection)
 
         _forward_and_grad = jax.value_and_grad(_forward, has_aux=True)
-        (loss, aux), grads = _forward_and_grad(
+        (loss, (forward_aux, forward_output_collection)), grads = _forward_and_grad(
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
-        updates, updated_learner_state = self.optimizer.update(grads, state=state.learner, params=state.model)
-        updated_model = optax.apply_updates(state.model, updates)
+        updated_model_params, learner_output_collection = F(
+            self.learner,
+            method="update",
+            state=state.learner,
+            is_training=True,
+            prng_key=learner_key,
+            inputs=dict(step=state.step, model_params=state.model, gradients=grads),
+        )
         updated_state = _TrainerState(
             step=state.step + 1,
-            model=updated_model,
-            learner=updated_learner_state
+            model=_apply_updates(
+                updated_model_params, forward_output_collection.state_updates
+            ),
+            learner=learner.LearnerState(**learner_output_collection.state_updates),
         )
-        return (loss, aux), updated_state
+        # TODO(ruoming): only retrieve summaries when necessary.
+        summaries = dict(
+            model=forward_output_collection.summaries,
+            learner=learner_output_collection.summaries,
+        )
+        return dict(
+            state=updated_state,
+            summaries=summaries,
+            loss=loss,
+            aux=forward_aux,
+        )
 
     def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
+        self.vlog(3, "Compiling computation %s", fn)
         if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
             fn = pjit(fn, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources, **kwargs)
         else:
@@ -257,6 +325,7 @@ class Trainer:
                 [device.platform for device in jax.devices()],
             )
             fn = jax.jit(fn, **kwargs)
+        self.vlog(3, "Compiling computation done")
         return fn
 
 
@@ -279,21 +348,11 @@ def imagenet_trainer_config():
     cfg.input = DummyInput.default_config().set(
         global_batch_size=train_batch_size,
     )
-    cfg.evalers = []
-
-    # Summaries and checkpoints.
-    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
-    cfg.checkpointer.write_every_n_steps = 100000000
-    cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
-    summary_dir = os.path.join(FLAGS.dir, "summaries")
-    cfg.summary_writer.write_every_n_steps = 100000000
-    cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     return cfg
 
 
 def run_trainer(trainer_config):
-    trainer = Trainer(input_config=trainer_config.input,
-                      model_config=trainer_config.model)
+    trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
     prng_key = jax.random.PRNGKey(1)
     mesh_shape = (jax.device_count(), 1)
     devices = mesh_utils.create_device_mesh(mesh_shape)
@@ -307,6 +366,7 @@ def main(argv):
     if FLAGS.jax_profiler_port is not None:
         server = jax.profiler.start_server(FLAGS.jax_profiler_port)
 
+    logging.info("Creating trainer config")
     trainer_config = imagenet_trainer_config()
     logging.info("Trainer config: %s", trainer_config.debug_string())
     run_trainer(trainer_config)

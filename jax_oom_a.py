@@ -1,4 +1,4 @@
-"""A launcher to train ResNet-18 on ImageNet.
+"""A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
@@ -6,6 +6,8 @@ exp=$(date +%F-%H-%M)
 dir=gs://${gs_bucket}/${USER}/experiments/jax_oom_a
 echo $dir
 python3 jax_oom_a.py --dir=$dir 2>&1 | tee log.${exp}
+
+This program shows a fast and persistent increase in memory usage (~160GB/hour).
 """
 import os.path
 from typing import Dict, Optional
