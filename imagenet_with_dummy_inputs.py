@@ -12,18 +12,20 @@ gcloud auth application-default login
 tensorboard --logdir=$dir/summaries
 """
 import os.path
+from typing import Dict, Optional
 
-from absl import app, flags, logging
 import jax  # jax must be imported before tensorflow!
+import numpy as np
+from absl import app, flags, logging
+from jax import numpy as jnp
 from jax.experimental import maps
 from jax.experimental import mesh_utils
-import numpy as np
 
 import config as config_lib
 import learner
-import resnet
+import param_init
 import schedule
-from module import Module
+from module import BaseLayer, Module, NestedParameterSpec, NestedTensor, ParameterSpec, Tensor
 from trainer import SpmdTrainer, SpmdEvaler
 
 flags.DEFINE_string(
@@ -68,8 +70,8 @@ class DummyInput(Module):
         cfg = self.config
         self._num_batches += 1
         if (
-            cfg.total_num_batches is not None
-            and self._num_batches > cfg.total_num_batches
+                cfg.total_num_batches is not None
+                and self._num_batches > cfg.total_num_batches
         ):
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
@@ -87,6 +89,31 @@ class DummyInput(Module):
         )
 
 
+class DummyModel(BaseLayer):
+
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
+        return {
+            'scale': ParameterSpec(shape=[], partition_spec=[]),
+            'bias': ParameterSpec(shape=[], partition_spec=[]),
+        }
+
+    def initialize_parameters_recursively(
+        self,
+        prng_key: jax.random.KeyArray,
+        param_specs: Optional[NestedParameterSpec] = None,
+    ) -> NestedTensor:
+        return {
+            'scale': jnp.ones(shape=[], dtype=jnp.float32),
+            'bias': jnp.zeros(shape=[], dtype=jnp.float32),
+        }
+
+    def forward(self, image: Tensor, label: Tensor):
+        x = image.mean(axis=(1, 2, 3))
+        x = x * self.state['scale'] + self.state['bias']
+        loss = jnp.abs(x - label.astype(x.dtype)).mean()
+        return loss, {}
+
+
 def imagenet_trainer_config():
     num_train_examples = 1_281_167
     train_batch_size = 256
@@ -97,7 +124,8 @@ def imagenet_trainer_config():
     cfg.name = "imagenet_trainer"
 
     # Model and optimization.
-    cfg.model = resnet.ResNetModel.default_config().set(num_blocks_per_stage=[])
+    cfg.model = DummyModel.default_config().set(dtype=jnp.float32,
+                                                param_init=param_init.DefaultInitializer.default_config())
     learning_rate = config_lib.config_for_function(schedule.stepwise).set(
         sub=[0.1, 0.01, 0.001],
         start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
