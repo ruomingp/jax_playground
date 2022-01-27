@@ -1,10 +1,9 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-python3 jax_oom_c.py --dir=./jax_oom_c 2>&1 | tee ./jax_oom_c/log
-
-This program shows a fast and persistent increase in memory usage (~90GB/hour).
+mkdir -p ./jax_oom_d && python3 jax_oom_d.py --dir=./jax_oom_d 2>&1 | tee ./jax_oom_d/log
 """
+import os.path
 import time
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 
@@ -18,9 +17,11 @@ from jax.experimental import maps
 from jax.experimental import mesh_utils
 from jax.experimental.pjit import pjit
 
+import checkpointer
 import config as config_lib
 import learner
 import param_init
+import summary_writer
 from module import BaseLayer, NestedParameterSpec, ParameterSpec
 from module import functional as F, Module, NestedTensor, NestedPartitionSpec
 from utils import Tensor, tree_paths
@@ -140,22 +141,43 @@ class _TrainerState(NamedTuple):
 
 
 class SpmdTrainer(Module):
+    """A base class for running computation (training, evaluation, predictions) on SPMD."""
+
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("input", None, "The model input config.")
+        cfg.define(
+            "summary_writer",
+            summary_writer.SummaryWriter.default_config(),
+            "The summary writer.",
+        )
         cfg.define("model", None, "The model config.")
         cfg.define("learner", None, "The learner config.")
+        cfg.define(
+            "checkpointer",
+            checkpointer.Checkpointer.default_config(),
+            "The checkpointer.",
+        )
+        cfg.define(
+            "evalers",
+            tuple(),
+            "A list/tuple of evaler configs, each must have non-empty and unique names.",
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         self._add_child("input", cfg.input)
-        self._add_child("model", cfg.model)
-        self._add_child("learner", cfg.learner)
+        self._add_child("summary_writer", cfg.summary_writer)
         self._state = None
         self._jit_compute = None
+        self._add_child("model", cfg.model)
+        self._add_child("learner", cfg.learner)
+        self._add_child("checkpointer", cfg.checkpointer)
+        for evaler_cfg in cfg.evalers:
+            self._add_child(evaler_cfg.name, evaler_cfg)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
         self.vlog(3, "Model param specs: %s", self._model_param_specs)
@@ -178,10 +200,32 @@ class SpmdTrainer(Module):
             in_axis_resources=(
                 None,  # prng_key
                 self._trainer_state_partition_specs,
-                PartitionSpec("data")),
+                self._input_sharding(),
+            ),
             out_axis_resources=None,
             donate_argnums=(0, 1, 2),
         )
+        for evaler_cfg in cfg.evalers:
+            self._children[evaler_cfg.name].init(self.model, model_param_partition_specs)
+
+    def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
+        self.vlog(3, "Compiling computation %s", fn)
+        if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
+            fn = pjit(fn, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources, **kwargs)
+        else:
+            logging.log_first_n(
+                logging.INFO,
+                "Falling back to jit on %s",
+                1,
+                [device.platform for device in jax.devices()],
+            )
+            fn = jax.jit(fn, **kwargs)
+        self.vlog(3, "Compiling computation done")
+        return fn
+
+    def _input_sharding(self):
+        # Shard data along the batch dim.
+        return PartitionSpec("data")
 
     @property
     def step(self):
@@ -205,7 +249,7 @@ class SpmdTrainer(Module):
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
-        with jax.profiler.trace(FLAGS.dir):
+        with jax.profiler.trace(cfg.summary_writer.dir):
             start_time = time.perf_counter()
             num_steps = 0
             for input_batch in self.input:
@@ -248,6 +292,9 @@ class SpmdTrainer(Module):
         for path, value in zip(flat_paths, flat_values):
             self._step_log("State: %s=%s(%s)", path, value.dtype, value.shape)
 
+        # Try to restore the latest checkpoint.
+        self._state = self.checkpointer.restore(step=None, state=self._state)
+
     def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
         self.vlog(3, "  train_step: %s", self.step + 1)
@@ -264,6 +311,20 @@ class SpmdTrainer(Module):
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
             )
+        self.vlog(3, "  summary_writer: %s", self.step)
+        self.summary_writer(
+            self.step, {"loss": outputs["loss"], **outputs["summaries"]}
+        )
+        self.vlog(3, "  eval: %s", self.step)
+        for evaler_cfg in cfg.evalers:
+            prng_key, eval_key = jax.random.split(prng_key)
+            self._children[evaler_cfg.name].run_step(
+                self.step,
+                prng_key=eval_key,
+                model_params=self._state.model,
+            )
+        self.vlog(3, "  checkpointer: %s", self.step)
+        self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
             self,
@@ -315,21 +376,6 @@ class SpmdTrainer(Module):
             aux=forward_aux,
         )
 
-    def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
-        self.vlog(3, "Compiling computation %s", fn)
-        if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
-            fn = pjit(fn, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources, **kwargs)
-        else:
-            logging.log_first_n(
-                logging.INFO,
-                "Falling back to jit on %s",
-                1,
-                [device.platform for device in jax.devices()],
-            )
-            fn = jax.jit(fn, **kwargs)
-        self.vlog(3, "Compiling computation done")
-        return fn
-
 
 def imagenet_trainer_config():
     num_train_examples = 1_281_167
@@ -350,6 +396,15 @@ def imagenet_trainer_config():
     cfg.input = DummyInput.default_config().set(
         global_batch_size=train_batch_size,
     )
+    cfg.evalers = []
+
+    # Summaries and checkpoints.
+    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
+    cfg.checkpointer.write_every_n_steps = 100000000
+    cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
+    summary_dir = os.path.join(FLAGS.dir, "summaries")
+    cfg.summary_writer.write_every_n_steps = 100000000
+    cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     return cfg
 
 
