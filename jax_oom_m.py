@@ -311,9 +311,6 @@ def imagenet_trainer_config():
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
 
-    # Model and optimization.
-    cfg.model = DummyModel.default_config().set(dtype=jnp.float32,
-                                                param_init=param_init.DefaultInitializer.default_config())
     # Training inputs.
     cfg.input = DummyInput.default_config().set(
         global_batch_size=train_batch_size,
