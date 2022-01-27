@@ -22,7 +22,7 @@ import learner
 import param_init
 from module import BaseLayer, NestedParameterSpec, ParameterSpec
 from module import functional as F, Module, NestedTensor, NestedPartitionSpec
-from utils import Tensor, tree_paths
+from utils import Tensor, tree_paths, shapes
 
 flags.DEFINE_string(
     "dir",
@@ -279,11 +279,12 @@ class SpmdTrainer(Module):
             self._state = outputs["state"]
         if self._state.step % 1 == 0:
             self._step_log(
-                "loss=%s aux=%s",
+                "loss=%s aux=%s state=%s",
                 outputs["loss"],
                 jax.tree_map(
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
+                shapes(self._state),
             )
 
     def _train_step(
