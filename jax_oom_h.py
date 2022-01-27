@@ -292,10 +292,8 @@ class SpmdTrainer(Module):
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
             )
-        self.vlog(3, "  summary_writer: %s", self.step)
-        self.summary_writer(
-            self.step, {"loss": outputs["loss"], **outputs["summaries"]}
-        )
+        # self.vlog(3, "  summary_writer: %s", self.step)
+        # self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
         self.vlog(3, "  checkpointer: %s", self.step)
         self.checkpointer.save(step=self.step, state=self._state)
 
