@@ -1,7 +1,7 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-mkdir -p ./jax_oom_j && python3 jax_oom_j.py --dir=./jax_oom_j 2>&1 | tee ./jax_oom_j/log
+mkdir -p ./jax_oom_k && python3 jax_oom_k.py --dir=./jax_oom_k 2>&1 | tee ./jax_oom_k/log
 
 Same as jax_oom_i except not calling checkpointer. Still fast memory growth.
 """
@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 
 import jax
 import numpy as np
+import optax
 from absl import app, flags
 from absl import logging
 from jax import numpy as jnp
@@ -156,12 +157,13 @@ class SpmdTrainer(Module):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         self._add_child("input", cfg.input)
-        self._add_child("summary_writer", cfg.summary_writer)
+        # self._add_child("summary_writer", cfg.summary_writer)
         self._state = None
         self._jit_compute = None
         self._add_child("model", cfg.model)
-        self._add_child("learner", cfg.learner)
-        self._add_child("checkpointer", cfg.checkpointer)
+        # self._add_child("learner", cfg.learner)
+        self.learner = no_op_optimizer()
+        # self._add_child("checkpointer", cfg.checkpointer)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
         self.vlog(3, "Model param specs: %s", self._model_param_specs)
@@ -171,7 +173,7 @@ class SpmdTrainer(Module):
         # for path, spec in flatten_items(model_param_partition_specs):
         #     self.vlog(3, "Model param partition: %s=%s", path, spec)
         self._step_log("Model param partition: %s", model_param_partition_specs)
-        learner_state_partition_specs = self.learner.create_state_partition_specs(
+        learner_state_partition_specs = self.learner.partition(
             model_param_partition_specs
         )
         self._trainer_state_partition_specs = _TrainerState(
@@ -325,24 +327,17 @@ class SpmdTrainer(Module):
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
-        updated_model_params, learner_output_collection = F(
-            self.learner,
-            method="update",
-            state=state.learner,
-            is_training=True,
-            prng_key=learner_key,
-            inputs=dict(step=state.step, model_params=state.model, gradients=grads),
-        )
+        updates, updated_learner_state = self.learner.update(grads, state=state.learner, params=state.model)
+        updated_model_params = optax.apply_updates(state.model, updates)
         updated_state = _TrainerState(
             step=state.step + 1,
             # model=_apply_updates(updated_model_params, forward_output_collection.state_updates),
             model=updated_model_params,
-            learner=learner.LearnerState(**learner_output_collection.state_updates),
+            learner=updated_learner_state,
         )
         # TODO(ruoming): only retrieve summaries when necessary.
         summaries = dict(
             model=forward_output_collection.summaries,
-            learner=learner_output_collection.summaries,
         )
         return dict(
             state=updated_state,
