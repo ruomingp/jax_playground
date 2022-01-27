@@ -1,9 +1,7 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-mkdir -p ./jax_oom_d && python3 jax_oom_d.py --dir=./jax_oom_d 2>&1 | tee ./jax_oom_d/log
-
-Same rate as jax_oom_a.py.
+mkdir -p ./jax_oom_e && python3 jax_oom_e.py --dir=./jax_oom_e 2>&1 | tee ./jax_oom_e/log
 """
 import os.path
 import time
@@ -19,11 +17,9 @@ from jax.experimental import maps
 from jax.experimental import mesh_utils
 from jax.experimental.pjit import pjit
 
-import checkpointer
 import config as config_lib
 import learner
 import param_init
-import summary_writer
 from module import BaseLayer, NestedParameterSpec, ParameterSpec
 from module import functional as F, Module, NestedTensor, NestedPartitionSpec
 from utils import Tensor, tree_paths
@@ -149,37 +145,18 @@ class SpmdTrainer(Module):
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("input", None, "The model input config.")
-        cfg.define(
-            "summary_writer",
-            summary_writer.SummaryWriter.default_config(),
-            "The summary writer.",
-        )
         cfg.define("model", None, "The model config.")
         cfg.define("learner", None, "The learner config.")
-        cfg.define(
-            "checkpointer",
-            checkpointer.Checkpointer.default_config(),
-            "The checkpointer.",
-        )
-        cfg.define(
-            "evalers",
-            tuple(),
-            "A list/tuple of evaler configs, each must have non-empty and unique names.",
-        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         self._add_child("input", cfg.input)
-        self._add_child("summary_writer", cfg.summary_writer)
         self._state = None
         self._jit_compute = None
         self._add_child("model", cfg.model)
         self._add_child("learner", cfg.learner)
-        self._add_child("checkpointer", cfg.checkpointer)
-        for evaler_cfg in cfg.evalers:
-            self._add_child(evaler_cfg.name, evaler_cfg)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
         self.vlog(3, "Model param specs: %s", self._model_param_specs)
@@ -207,8 +184,6 @@ class SpmdTrainer(Module):
             out_axis_resources=None,
             donate_argnums=(0, 1, 2),
         )
-        for evaler_cfg in cfg.evalers:
-            self._children[evaler_cfg.name].init(self.model, model_param_partition_specs)
 
     def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
         self.vlog(3, "Compiling computation %s", fn)
@@ -251,7 +226,7 @@ class SpmdTrainer(Module):
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
-        with jax.profiler.trace(cfg.summary_writer.dir):
+        with jax.profiler.trace(FLAGS.dir):
             start_time = time.perf_counter()
             num_steps = 0
             for input_batch in self.input:
@@ -294,9 +269,6 @@ class SpmdTrainer(Module):
         for path, value in zip(flat_paths, flat_values):
             self._step_log("State: %s=%s(%s)", path, value.dtype, value.shape)
 
-        # Try to restore the latest checkpoint.
-        self._state = self.checkpointer.restore(step=None, state=self._state)
-
     def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
         self.vlog(3, "  train_step: %s", self.step + 1)
@@ -313,20 +285,6 @@ class SpmdTrainer(Module):
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
             )
-        self.vlog(3, "  summary_writer: %s", self.step)
-        self.summary_writer(
-            self.step, {"loss": outputs["loss"], **outputs["summaries"]}
-        )
-        self.vlog(3, "  eval: %s", self.step)
-        for evaler_cfg in cfg.evalers:
-            prng_key, eval_key = jax.random.split(prng_key)
-            self._children[evaler_cfg.name].run_step(
-                self.step,
-                prng_key=eval_key,
-                model_params=self._state.model,
-            )
-        self.vlog(3, "  checkpointer: %s", self.step)
-        self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
             self,
@@ -382,8 +340,6 @@ class SpmdTrainer(Module):
 def imagenet_trainer_config():
     num_train_examples = 1_281_167
     train_batch_size = 256
-    eval_batch_size = 80  # divides 50_000 and can be divided by number of devices (8)
-    steps_per_epoch = num_train_examples // train_batch_size
 
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
@@ -398,15 +354,6 @@ def imagenet_trainer_config():
     cfg.input = DummyInput.default_config().set(
         global_batch_size=train_batch_size,
     )
-    cfg.evalers = []
-
-    # Summaries and checkpoints.
-    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
-    cfg.checkpointer.write_every_n_steps = 100000000
-    cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
-    summary_dir = os.path.join(FLAGS.dir, "summaries")
-    cfg.summary_writer.write_every_n_steps = 100000000
-    cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     return cfg
 
 
