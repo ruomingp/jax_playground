@@ -3,7 +3,7 @@
 On the TPU VM:
 mkdir -p ./jax_oom_f && python3 jax_oom_f.py --dir=./jax_oom_f 2>&1 | tee ./jax_oom_f/log
 
-Same rate as jax_oom_a.py (>30GB in 10min).
+Same rate as jax_oom_d (30GB in ~10min).
 """
 import os.path
 import time

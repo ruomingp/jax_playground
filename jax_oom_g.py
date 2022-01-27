@@ -1,9 +1,9 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-mkdir -p ./jax_oom_e && python3 jax_oom_e.py --dir=./jax_oom_e 2>&1 | tee ./jax_oom_e/log
+mkdir -p ./jax_oom_g && python3 jax_oom_g.py --dir=./jax_oom_g 2>&1 | tee ./jax_oom_g/log
 
-Mysteriously using memory slower than jax_oom_d.
+Same as jax_oom_f except not calling _apply_updates().
 """
 import os.path
 import time
@@ -19,12 +19,14 @@ from jax.experimental import maps
 from jax.experimental import mesh_utils
 from jax.experimental.pjit import pjit
 
+import checkpointer
 import config as config_lib
 import learner
 import param_init
+import summary_writer
 from module import BaseLayer, NestedParameterSpec, ParameterSpec
 from module import functional as F, Module, NestedTensor, NestedPartitionSpec
-from utils import Tensor, tree_paths, shapes
+from utils import Tensor, tree_paths
 
 flags.DEFINE_string(
     "dir",
@@ -122,18 +124,6 @@ def no_op_optimizer() -> learner.PartitionedGradientTransformation:
     )
 
 
-def _apply_updates(base, updates):
-    if isinstance(updates, jnp.ndarray):
-        assert isinstance(base, jnp.ndarray), base
-        return updates
-    for k, v in updates.items():
-        if k not in base:
-            base[k] = v
-        else:
-            base[k] = _apply_updates(base[k], v)
-    return base
-
-
 class _TrainerState(NamedTuple):
     step: Union[Tensor, NestedPartitionSpec]
     model: Union[NestedTensor, NestedPartitionSpec]
@@ -147,18 +137,30 @@ class SpmdTrainer(Module):
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("input", None, "The model input config.")
+        cfg.define(
+            "summary_writer",
+            summary_writer.SummaryWriter.default_config(),
+            "The summary writer.",
+        )
         cfg.define("model", None, "The model config.")
         cfg.define("learner", None, "The learner config.")
+        cfg.define(
+            "checkpointer",
+            checkpointer.Checkpointer.default_config(),
+            "The checkpointer.",
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         self._add_child("input", cfg.input)
+        self._add_child("summary_writer", cfg.summary_writer)
         self._state = None
         self._jit_compute = None
         self._add_child("model", cfg.model)
         self._add_child("learner", cfg.learner)
+        self._add_child("checkpointer", cfg.checkpointer)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
         self.vlog(3, "Model param specs: %s", self._model_param_specs)
@@ -228,7 +230,7 @@ class SpmdTrainer(Module):
         prng_key, init_key = jax.random.split(prng_key)
         self._init(init_key)
 
-        with jax.profiler.trace(FLAGS.dir):
+        with jax.profiler.trace(cfg.summary_writer.dir):
             start_time = time.perf_counter()
             num_steps = 0
             for input_batch in self.input:
@@ -271,6 +273,9 @@ class SpmdTrainer(Module):
         for path, value in zip(flat_paths, flat_values):
             self._step_log("State: %s=%s(%s)", path, value.dtype, value.shape)
 
+        # Try to restore the latest checkpoint.
+        self._state = self.checkpointer.restore(step=None, state=self._state)
+
     def _run_step(self, prng_key: jax.random.KeyArray, input_batch: Any):
         cfg = self.config
         self.vlog(3, "  train_step: %s", self.step + 1)
@@ -281,13 +286,18 @@ class SpmdTrainer(Module):
             self._state = outputs["state"]
         if self._state.step % 1 == 0:
             self._step_log(
-                "loss=%s aux=%s state=%s",
+                "loss=%s aux=%s",
                 outputs["loss"],
                 jax.tree_map(
                     lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
                 ),
-                shapes(self._state),
             )
+        self.vlog(3, "  summary_writer: %s", self.step)
+        self.summary_writer(
+            self.step, {"loss": outputs["loss"], **outputs["summaries"]}
+        )
+        self.vlog(3, "  checkpointer: %s", self.step)
+        self.checkpointer.save(step=self.step, state=self._state)
 
     def _train_step(
             self,
@@ -322,9 +332,8 @@ class SpmdTrainer(Module):
         )
         updated_state = _TrainerState(
             step=state.step + 1,
-            model=_apply_updates(
-                updated_model_params, forward_output_collection.state_updates
-            ),
+            # model=_apply_updates(updated_model_params, forward_output_collection.state_updates),
+            model=updated_model_params,
             learner=learner.LearnerState(**learner_output_collection.state_updates),
         )
         # TODO(ruoming): only retrieve summaries when necessary.
@@ -357,6 +366,14 @@ def imagenet_trainer_config():
     cfg.input = DummyInput.default_config().set(
         global_batch_size=train_batch_size,
     )
+
+    # Summaries and checkpoints.
+    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
+    cfg.checkpointer.write_every_n_steps = 100000000
+    cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
+    summary_dir = os.path.join(FLAGS.dir, "summaries")
+    cfg.summary_writer.write_every_n_steps = 100000000
+    cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
     return cfg
 
 
