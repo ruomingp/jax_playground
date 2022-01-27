@@ -1,9 +1,9 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-mkdir -p ./jax_oom_h && python3 jax_oom_h.py --dir=./jax_oom_h 2>&1 | tee ./jax_oom_h/log
+mkdir -p ./jax_oom_i && python3 jax_oom_i.py --dir=./jax_oom_i 2>&1 | tee ./jax_oom_i/log
 
-Same as jax_oom_g except not calling summary_writer.write(). Still fast.
+Same as jax_oom_h except not calling jax.random.split.
 """
 import os.path
 import time
@@ -70,7 +70,8 @@ class DummyInput(Module):
                 and self._num_batches > cfg.total_num_batches
         ):
             raise StopIteration()
-        self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
+        # self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
+        image_key, label_key = self._prng_key, self._prng_key
         return dict(
             image=jax.random.randint(
                 image_key,
@@ -227,14 +228,16 @@ class SpmdTrainer(Module):
         cfg = self.config
         jax.config.update('jax_log_compiles', True)
         self._step_log("Starting run up to step %s", max_step)
-        prng_key, init_key = jax.random.split(prng_key)
+        # prng_key, init_key = jax.random.split(prng_key)
+        init_key = prng_key
         self._init(init_key)
 
         with jax.profiler.trace(cfg.summary_writer.dir):
             start_time = time.perf_counter()
             num_steps = 0
             for input_batch in self.input:
-                prng_key, step_key = jax.random.split(prng_key)
+                # prng_key, step_key = jax.random.split(prng_key)
+                step_key = prng_key
                 self.vlog(3, "Start step %s", self.step + 1)
                 self._run_step(step_key, input_batch)
                 self.vlog(3, "Done step %s", self.step)
@@ -280,7 +283,8 @@ class SpmdTrainer(Module):
         cfg = self.config
         self.vlog(3, "  train_step: %s", self.step + 1)
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
-            prng_key, train_key = jax.random.split(prng_key)
+            # prng_key, train_key = jax.random.split(prng_key)
+            train_key = prng_key
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(train_key, self._state, input_batch)
             self._state = outputs["state"]
@@ -303,7 +307,8 @@ class SpmdTrainer(Module):
             state: _TrainerState,
             input_batch: Dict[str, Any],
     ):
-        prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
+        # prng_key, forward_key, learner_key = jax.random.split(prng_key, 3)
+        prng_key, forward_key, learner_key = prng_key, prng_key, prng_key
 
         def _forward(model_parameters, forward_input_batch):
             (loss, aux), model_output_collection = F(
