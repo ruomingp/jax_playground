@@ -1,11 +1,7 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-gs_bucket=permanent-us-central1-q5loch
-exp=$(date +%F-%H-%M)
-dir=gs://${gs_bucket}/${USER}/experiments/imagenet-dummy-inputs.${exp}
-echo $dir
-python3 jax_oom_test.py --dir=$dir 2>&1 | tee log.${exp}
+python3 jax_oom_test.py --dir=/tmp/jax_oom_test
 """
 
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
@@ -36,10 +32,6 @@ flags.DEFINE_string(
     "Summaries will be stored in <dir>/summaries.",
     required=True,
 )
-flags.DEFINE_list(
-    "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
-)
-flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
 
 FLAGS = flags.FLAGS
 
@@ -160,9 +152,8 @@ class Trainer:
             *args,
             **kwargs)
 
-    def run(self, prng_key: jax.random.KeyArray, max_step: int):
+    def run(self):
         jax.config.update('jax_log_compiles', True)
-        self._step_log("Starting run up to step %s", max_step)
         self._init()
 
         with jax.profiler.trace(FLAGS.dir):
@@ -232,25 +223,20 @@ class Trainer:
         return fn
 
 
-def run_trainer(mesh_shape):
+def run_trainer():
     trainer = Trainer()
-    prng_key = jax.random.PRNGKey(1)
-    run = lambda: trainer.run(prng_key, max_step=1000000)
-    if mesh_shape:
-        devices = mesh_utils.create_device_mesh(mesh_shape)
-        mesh = maps.Mesh(devices, ("data", "model"))
-        with maps.mesh(mesh.devices, mesh.axis_names):
-            run()
-    else:
-        run()
+    mesh_shape = (jax.device_count(), 1)
+    devices = mesh_utils.create_device_mesh(mesh_shape)
+    mesh = maps.Mesh(devices, ("data", "model"))
+    with maps.mesh(mesh.devices, mesh.axis_names):
+        trainer.run()
 
 
 def main(argv):
     # Start jax.profiler for Tensorboard and profiling in open source.
-    if FLAGS.jax_profiler_port is not None:
-        server = jax.profiler.start_server(FLAGS.jax_profiler_port)
+    server = jax.profiler.start_server(9999)
 
-    run_trainer(FLAGS.mesh_shape)
+    run_trainer()
 
 
 if __name__ == "__main__":
