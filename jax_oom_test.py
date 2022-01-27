@@ -98,8 +98,8 @@ class DummyModel:
 
     def parameter_partition_specs(self) -> NestedPartitionSpec:
         return {
-            'scale': [],
-            'bias': [],
+            'scale': PartitionSpec(),
+            'bias': PartitionSpec(),
         }
 
     def initialize_parameters_recursively(self) -> NestedTensor:
