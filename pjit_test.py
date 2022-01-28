@@ -33,8 +33,7 @@ def main(argv):
 
     x_spec = PartitionSpec("data", None)
     # y_spec = PartitionSpec("data", None)
-    y_spec = PartitionSpec('data', 'model')
-
+    y_spec = PartitionSpec("data", "model")
 
     def mlp(params, x):
         x = x @ params["w1"]
@@ -42,7 +41,6 @@ def main(argv):
         x = jnp.fmax(x, 0)
         x = x @ jnp.transpose(params["w2"])
         return x
-
 
     f = pjit(mlp, in_axis_resources=(param_spec, x_spec), out_axis_resources=y_spec)
 

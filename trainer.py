@@ -54,7 +54,12 @@ class _SpmdRunner(Module):
     def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
         self.vlog(3, "Compiling computation %s", fn)
         if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
-            fn = pjit(fn, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources, **kwargs)
+            fn = pjit(
+                fn,
+                in_axis_resources=in_axis_resources,
+                out_axis_resources=out_axis_resources,
+                **kwargs,
+            )
         else:
             logging.log_first_n(
                 logging.INFO,
@@ -132,7 +137,9 @@ class SpmdTrainer(_SpmdRunner):
             donate_argnums=(0, 1),
         )
         for evaler_cfg in cfg.evalers:
-            self._children[evaler_cfg.name].init(self.model, model_param_partition_specs)
+            self._children[evaler_cfg.name].init(
+                self.model, model_param_partition_specs
+            )
 
     @property
     def step(self):
@@ -147,10 +154,11 @@ class SpmdTrainer(_SpmdRunner):
             jax.process_index(),
             self.step,
             *args,
-            **kwargs)
+            **kwargs,
+        )
 
     def run(self, prng_key: jax.random.KeyArray, max_step: int) -> NestedTensor:
-        jax.config.update('jax_log_compiles', True)
+        jax.config.update("jax_log_compiles", True)
         self._step_log("Starting run up to step %s", max_step)
         self._init(prng_key)
 
@@ -168,7 +176,9 @@ class SpmdTrainer(_SpmdRunner):
             num_steps += 1
             if num_steps % 100 == 0:
                 now = time.perf_counter()
-                self._step_log("Average step time: %s seconds", (now - start_time) / num_steps)
+                self._step_log(
+                    "Average step time: %s seconds", (now - start_time) / num_steps
+                )
                 num_steps = 0
                 start_time = now
             if self.step >= max_step:
@@ -248,12 +258,12 @@ class SpmdTrainer(_SpmdRunner):
             )
         self.vlog(3, "  checkpointer: %s", self.step)
         self.checkpointer.save(step=self.step, state=self._state)
-        return {'loss': outputs["loss"], 'aux': outputs["aux"]}
+        return {"loss": outputs["loss"], "aux": outputs["aux"]}
 
     def _train_step(
-            self,
-            state: _TrainerState,
-            input_batch: Dict[str, Any],
+        self,
+        state: _TrainerState,
+        input_batch: Dict[str, Any],
     ):
         new_prng_key, forward_key, learner_key = jax.random.split(state.prng_key, 3)
 
@@ -330,11 +340,11 @@ class SpmdEvaler(_SpmdRunner):
         )
 
     def run_step(
-            self,
-            step: int,
-            *,
-            prng_key: jax.random.KeyArray,
-            model_params: NestedTensor,
+        self,
+        step: int,
+        *,
+        prng_key: jax.random.KeyArray,
+        model_params: NestedTensor,
     ):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
@@ -349,22 +359,24 @@ class SpmdEvaler(_SpmdRunner):
                 batch_key, model_params, input_batch
             )
             num_batches += 1
-            self.vlog(3,
-                      "Process % 3d step % 8d batch % 8d: %s.aux=%s",
-                      jax.process_index(),
-                      step,
-                      num_batches,
-                      self.path(),
-                      jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", aux),
-                      )
+            self.vlog(
+                3,
+                "Process % 3d step % 8d batch % 8d: %s.aux=%s",
+                jax.process_index(),
+                step,
+                num_batches,
+                self.path(),
+                jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", aux),
+            )
             metric_accumulator.update(output_collection.summaries)
         summaries = metric_accumulator.summaries()
-        self.vlog(2,
-                  "Process % 3d step % 8d: %s.metrics=%s",
-                  jax.process_index(),
-                  step,
-                  self.path(),
-                  summaries,
-                  )
+        self.vlog(
+            2,
+            "Process % 3d step % 8d: %s.metrics=%s",
+            jax.process_index(),
+            step,
+            self.path(),
+            summaries,
+        )
         self.summary_writer(step, summaries)
         self.vlog(3, "%s done at %s", self.path(), step)

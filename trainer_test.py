@@ -49,8 +49,8 @@ class DummyInput(Module):
         cfg = self.config
         self._num_batches += 1
         if (
-                cfg.total_num_batches is not None
-                and self._num_batches > cfg.total_num_batches
+            cfg.total_num_batches is not None
+            and self._num_batches > cfg.total_num_batches
         ):
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
@@ -63,13 +63,16 @@ class DummyInput(Module):
                 dtype=np.int32,
             ),
             label=jax.random.randint(
-                label_key, shape=[cfg.batch_size], minval=0, maxval=NUM_CLASSES, dtype=np.int32
+                label_key,
+                shape=[cfg.batch_size],
+                minval=0,
+                maxval=NUM_CLASSES,
+                dtype=np.int32,
             ),
         )
 
 
 class DummyModel(BaseLayer):
-
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
         super().__init__(cfg, parent=parent)
         cfg = self.config
@@ -87,9 +90,15 @@ class DummyModel(BaseLayer):
         # [batch, 3].
         hidden = image.mean(axis=(1, 2))
         logits: Tensor = self.fc(hidden)
-        loss = -(jax.nn.log_softmax(logits) * jax.nn.one_hot(label, NUM_CLASSES, dtype=logits.dtype)).sum(
-            axis=-1).mean()
-        return loss, {'prng_key': self.prng_key}
+        loss = (
+            -(
+                jax.nn.log_softmax(logits)
+                * jax.nn.one_hot(label, NUM_CLASSES, dtype=logits.dtype)
+            )
+            .sum(axis=-1)
+            .mean()
+        )
+        return loss, {"prng_key": self.prng_key}
 
 
 class TrainerTest(parameterized.TestCase):
@@ -101,8 +110,9 @@ class TrainerTest(parameterized.TestCase):
     def testTrainer(self, platform, mesh_shape):
         trainer_dir = tempfile.mkdtemp()
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
-        cfg.model = DummyModel.default_config().set(dtype=jnp.float32,
-                                                    param_init=param_init.DefaultInitializer.default_config())
+        cfg.model = DummyModel.default_config().set(
+            dtype=jnp.float32, param_init=param_init.DefaultInitializer.default_config()
+        )
         cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
             optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
@@ -136,8 +146,11 @@ class TrainerTest(parameterized.TestCase):
             trainer: SpmdTrainer = cfg.instantiate(parent=None)
             output_a = trainer.run(prng_key=jax.random.PRNGKey(123), max_step=12)
 
-        ckpt: Checkpointer = Checkpointer.default_config().set(name='ckpt', dir=cfg.checkpointer.dir).instantiate(
-            parent=None)
+        ckpt: Checkpointer = (
+            Checkpointer.default_config()
+            .set(name="ckpt", dir=cfg.checkpointer.dir)
+            .instantiate(parent=None)
+        )
         restored_state = ckpt.restore(step=None, state=trainer._state)
         self.assertEqual(10, restored_state.step)
         with maps.mesh(mesh.devices, mesh.axis_names):
@@ -145,7 +158,9 @@ class TrainerTest(parameterized.TestCase):
             # Since we will be resuming from the checkpoint at step 10, a different prng_key doesn't matter.
             output_b = trainer.run(prng_key=jax.random.PRNGKey(456), max_step=12)
         # The prng_key per step is deterministic.
-        np.testing.assert_array_equal(output_a["aux"]["prng_key"], output_b["aux"]["prng_key"])
+        np.testing.assert_array_equal(
+            output_a["aux"]["prng_key"], output_b["aux"]["prng_key"]
+        )
 
 
 if __name__ == "__main__":

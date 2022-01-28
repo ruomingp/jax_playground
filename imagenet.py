@@ -44,7 +44,9 @@ flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
 )
 flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
-flags.DEFINE_integer("interval", None, "If not None, the number of steps between ckpt and eval.")
+flags.DEFINE_integer(
+    "interval", None, "If not None, the number of steps between ckpt and eval."
+)
 
 FLAGS = flags.FLAGS
 

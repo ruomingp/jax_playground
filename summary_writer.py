@@ -21,7 +21,11 @@ class SummaryWriter(Module):
         cfg = super().default_config()
         cfg.define("dir", None, "The output directory.")
         cfg.define("write_every_n_steps", 1, "Writes summary every N steps.")
-        cfg.define("print_heap", False, "Whether print the heap profile when writing the summary.")
+        cfg.define(
+            "print_heap",
+            False,
+            "Whether print the heap profile when writing the summary.",
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):

@@ -51,7 +51,9 @@ class TfdsInput(Module):
         )
         cfg.define("shuffle_seed", None, "The shuffle seed.")
         cfg.define(
-            "prefetch_buffer_size", None, "The prefetch buffer size. If None, prefetch is disabled."
+            "prefetch_buffer_size",
+            None,
+            "The prefetch buffer size. If None, prefetch is disabled.",
         )
         return cfg
 

@@ -21,7 +21,14 @@ import config as config_lib
 import learner
 import param_init
 import schedule
-from module import BaseLayer, Module, NestedParameterSpec, NestedTensor, ParameterSpec, Tensor
+from module import (
+    BaseLayer,
+    Module,
+    NestedParameterSpec,
+    NestedTensor,
+    ParameterSpec,
+    Tensor,
+)
 from trainer import SpmdTrainer, SpmdEvaler
 
 flags.DEFINE_string(
@@ -36,7 +43,9 @@ flags.DEFINE_list(
     "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
 )
 flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
-flags.DEFINE_integer("interval", None, "If not None, the number of steps between ckpt and eval.")
+flags.DEFINE_integer(
+    "interval", None, "If not None, the number of steps between ckpt and eval."
+)
 
 FLAGS = flags.FLAGS
 
@@ -66,8 +75,8 @@ class DummyInput(Module):
         cfg = self.config
         self._num_batches += 1
         if (
-                cfg.total_num_batches is not None
-                and self._num_batches > cfg.total_num_batches
+            cfg.total_num_batches is not None
+            and self._num_batches > cfg.total_num_batches
         ):
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
@@ -80,32 +89,35 @@ class DummyInput(Module):
                 dtype=np.int32,
             ),
             label=jax.random.randint(
-                label_key, shape=[cfg.global_batch_size], minval=0, maxval=1000, dtype=np.int32
+                label_key,
+                shape=[cfg.global_batch_size],
+                minval=0,
+                maxval=1000,
+                dtype=np.int32,
             ),
         )
 
 
 class DummyModel(BaseLayer):
-
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         return {
-            'scale': ParameterSpec(shape=[], partition_spec=[]),
-            'bias': ParameterSpec(shape=[], partition_spec=[]),
+            "scale": ParameterSpec(shape=[], partition_spec=[]),
+            "bias": ParameterSpec(shape=[], partition_spec=[]),
         }
 
     def initialize_parameters_recursively(
-            self,
-            prng_key: jax.random.KeyArray,
-            param_specs: Optional[NestedParameterSpec] = None,
+        self,
+        prng_key: jax.random.KeyArray,
+        param_specs: Optional[NestedParameterSpec] = None,
     ) -> NestedTensor:
         return {
-            'scale': jnp.ones(shape=[], dtype=jnp.float32),
-            'bias': jnp.zeros(shape=[], dtype=jnp.float32),
+            "scale": jnp.ones(shape=[], dtype=jnp.float32),
+            "bias": jnp.zeros(shape=[], dtype=jnp.float32),
         }
 
     def forward(self, image: Tensor, label: Tensor):
         x = image.mean(axis=(1, 2, 3))
-        x = x * self.state['scale'] + self.state['bias']
+        x = x * self.state["scale"] + self.state["bias"]
         loss = jnp.abs(x - label.astype(x.dtype)).mean()
         return loss, {}
 
@@ -134,10 +146,12 @@ def imagenet_trainer_config():
     cfg.name = "imagenet_trainer"
 
     # Model and optimization.
-    cfg.model = DummyModel.default_config().set(dtype=jnp.float32,
-                                                param_init=param_init.DefaultInitializer.default_config())
+    cfg.model = DummyModel.default_config().set(
+        dtype=jnp.float32, param_init=param_init.DefaultInitializer.default_config()
+    )
     cfg.learner = learner.Learner.default_config().set(
-        optimizer=config_lib.config_for_function(no_op_optimizer))
+        optimizer=config_lib.config_for_function(no_op_optimizer)
+    )
 
     # Training inputs.
     cfg.input = DummyInput.default_config().set(
@@ -159,7 +173,9 @@ def imagenet_trainer_config():
 def run_trainer(trainer_config, mesh_shape):
     trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
     prng_key = jax.random.PRNGKey(1)
-    run = lambda: trainer.run(prng_key, max_step=(FLAGS.interval * 10 if FLAGS.interval else 5004 * 90))
+    run = lambda: trainer.run(
+        prng_key, max_step=(FLAGS.interval * 10 if FLAGS.interval else 5004 * 90)
+    )
     if mesh_shape:
         devices = mesh_utils.create_device_mesh(mesh_shape)
         mesh = maps.Mesh(devices, ("data", "model"))
