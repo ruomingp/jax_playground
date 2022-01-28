@@ -1,3 +1,4 @@
+import os.path
 import time
 from functools import partial
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
@@ -14,7 +15,7 @@ import learner
 import metrics
 import summary_writer
 from module import functional as F, Module, NestedTensor, NestedPartitionSpec
-from utils import Tensor, tree_paths
+from utils import Tensor, flatten_items, tree_paths
 
 
 def _apply_updates(base, updates):
@@ -87,36 +88,48 @@ class SpmdTrainer(_SpmdRunner):
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
+        cfg.define("dir", None,
+                   "The trainer root dir. "
+                   "By default, checkpoints will be written under {dir}/checkpoints/ "
+                   "and summaries will be written under {dir}/summaries.")
         cfg.define("model", None, "The model config.")
         cfg.define("learner", None, "The learner config.")
         cfg.define(
             "checkpointer",
             checkpointer.Checkpointer.default_config(),
-            "The checkpointer.",
+            "The checkpointer config.",
         )
         cfg.define(
             "evalers",
-            tuple(),
-            "A list/tuple of evaler configs, each must have non-empty and unique names.",
+            dict(),
+            "A dict of evaler names to configs, each name must be non-empty.",
         )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
+        logging.info("Trainer config:\n%s", cfg.debug_string())
+        cfg.summary_writer.dir = cfg.summary_writer.dir or os.path.join(cfg.dir, "summaries", "train_train")
         super().__init__(cfg, parent=parent)
         cfg = self.config
+
         self._add_child("model", cfg.model)
         self._add_child("learner", cfg.learner)
+
+        cfg.checkpointer.dir = cfg.checkpointer.dir or os.path.join(cfg.dir, "checkpoints")
         self._add_child("checkpointer", cfg.checkpointer)
-        for evaler_cfg in cfg.evalers:
-            self._add_child(evaler_cfg.name, evaler_cfg)
+
+        for evaler_name, evaler_cfg in cfg.evalers.items():
+            evaler_cfg.summary_writer.dir = evaler_cfg.summary_writer.dir or os.path.join(cfg.dir, "summaries",
+                                                                                          evaler_name)
+            self._add_child(evaler_name, evaler_cfg)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
         self.vlog(3, "Model param specs: %s", self._model_param_specs)
         model_param_partition_specs = jax.tree_map(
             lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
         )
-        # for path, spec in flatten_items(model_param_partition_specs):
-        #     self.vlog(3, "Model param partition: %s=%s", path, spec)
+        for path, spec in flatten_items(model_param_partition_specs):
+            self.vlog(3, "Model param partition: %s=%s", path, spec)
         self._step_log("Model param partition: %s", model_param_partition_specs)
         learner_state_partition_specs = self.learner.create_state_partition_specs(
             model_param_partition_specs
@@ -259,9 +272,9 @@ class SpmdTrainer(_SpmdRunner):
         return {"loss": outputs["loss"], "aux": outputs["aux"]}
 
     def _train_step(
-        self,
-        state: _TrainerState,
-        input_batch: Dict[str, Any],
+            self,
+            state: _TrainerState,
+            input_batch: Dict[str, Any],
     ):
         new_prng_key, forward_key, learner_key = jax.random.split(state.prng_key, 3)
 
@@ -338,11 +351,11 @@ class SpmdEvaler(_SpmdRunner):
         )
 
     def run_step(
-        self,
-        step: int,
-        *,
-        prng_key: jax.random.KeyArray,
-        model_params: NestedTensor,
+            self,
+            step: int,
+            *,
+            prng_key: jax.random.KeyArray,
+            model_params: NestedTensor,
     ):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:

@@ -69,8 +69,8 @@ class ConfigTest(absltest.TestCase):
                 [
                     "sub[0]: None",
                     "sub[1]: 123",
-                    "sub[2]: str",
-                    "sub[3]: numpy.float64",
+                    "sub[2]: 'str'",
+                    "sub[3]: 'numpy.float64'",
                 ]
             ),
             cfg.debug_string(),
@@ -82,8 +82,8 @@ class ConfigTest(absltest.TestCase):
                 [
                     "sub[0]: None",
                     "sub[1]: 123",
-                    "sub[2]: str",
-                    "sub[3]: numpy.float64",
+                    "sub[2]: 'str'",
+                    "sub[3]: 'numpy.float64'",
                 ]
             ),
             cfg.debug_string(),
@@ -93,10 +93,10 @@ class ConfigTest(absltest.TestCase):
         self.assertEqual(
             "\n".join(
                 [
-                    "sub[none]: None",
-                    "sub[int]: 123",
-                    "sub[str]: str",
-                    "sub[type]: numpy.float64",
+                    "sub['none']: None",
+                    "sub['int']: 123",
+                    "sub['str']: 'str'",
+                    "sub['type']: 'numpy.float64'",
                 ]
             ),
             cfg.debug_string(),
@@ -107,10 +107,10 @@ class ConfigTest(absltest.TestCase):
         self.assertEqual(
             "\n".join(
                 [
-                    "sub[none]: None",
-                    "sub[int]: 123",
-                    "sub[str]: str",
-                    "sub[type]: numpy.float64",
+                    "sub['none']: None",
+                    "sub['int']: 123",
+                    "sub['str']: 'str'",
+                    "sub['type']: 'numpy.float64'",
                 ]
             ),
             cfg.debug_string(),
@@ -120,16 +120,16 @@ class ConfigTest(absltest.TestCase):
         @dataclasses.dataclass
         class dclass:
             int_val: int
-            str_val: str
+            str_val: 'str'
             type_val: np.dtype
 
         cfg.sub = dclass(int_val=123, str_val="str", type_val=np.float64)
         self.assertEqual(
             "\n".join(
                 [
-                    "sub[int_val]: 123",
-                    "sub[str_val]: str",
-                    "sub[type_val]: numpy.float64",
+                    "sub['int_val']: 123",
+                    "sub['str_val']: 'str'",
+                    "sub['type_val']: 'numpy.float64'",
                 ]
             ),
             cfg.debug_string(),

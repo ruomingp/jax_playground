@@ -195,7 +195,7 @@ class Config:
         def fmt(val):
             if isinstance(val, (type, types.FunctionType)):
                 val = f"{val.__module__}.{val.__name__}"
-            return val
+            return repr(val)
 
         self.visit(lambda key, val: lines.append(f"{key}{kv_separator}{fmt(val)}"))
         return field_separator.join(lines)
@@ -261,7 +261,7 @@ class Config:
             if isinstance(val, Config):
                 return [(_sub_key(key, k), v) for k, v in val.items()]
             elif isinstance(val, dict):
-                return [(f"{key}[{k}]", v) for k, v in val.items()]
+                return [(f"{key}[{repr(k)}]", v) for k, v in val.items()]
             elif dataclasses.is_dataclass(val):
                 return _default_enter_fn(key, val.__dict__)
             elif is_named_tuple(val):

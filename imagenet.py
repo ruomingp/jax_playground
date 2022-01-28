@@ -2,7 +2,7 @@
 
 On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
-dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)a
+dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)b
 echo $dir
 data_dir=gs://${gs_bucket}/tensorflow_datasets
 echo $data_dir
@@ -59,6 +59,7 @@ def imagenet_trainer_config():
 
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
+    cfg.dir = FLAGS.dir
 
     # Model and optimization.
     cfg.model = resnet.ResNetModel.resnet18_config()
@@ -90,30 +91,22 @@ def imagenet_trainer_config():
 
     # Evaluation.
     evaler_train = SpmdEvaler.default_config().set(
-        name="eval_train",
         input=ImagenetInput.default_config().set(
             split="train[:160]" if FLAGS.interval else "train[0:50000]"
         ),
     )
     evaler_validation = SpmdEvaler.default_config().set(
-        name="eval_validation",
         input=ImagenetInput.default_config().set(
             split="validation[:160]" if FLAGS.interval else "validation"
         ),
     )
-    cfg.evalers = (evaler_train, evaler_validation)
+    cfg.evalers = dict(eval_train=evaler_train, eval_validation=evaler_validation)
 
     # Summaries and checkpoints.
-    cfg.checkpointer.dir = os.path.join(FLAGS.dir, "checkpoints")
     cfg.checkpointer.write_every_n_steps = FLAGS.interval or steps_per_epoch
     cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
-    summary_dir = os.path.join(FLAGS.dir, "summaries")
     cfg.summary_writer.write_every_n_steps = 100
-    cfg.summary_writer.print_heap = False
-    cfg.summary_writer.dir = os.path.join(summary_dir, "train_train")
-    cfg.vlog = 0  # Set to 5 to enable verbose logging.
-    for evaler_cfg in cfg.evalers:
-        evaler_cfg.vlog = 0
+    for evaler_cfg in cfg.evalers.values():
         evaler_cfg.run_every_n_steps = FLAGS.interval or steps_per_epoch
         evaler_cfg.input.set(
             is_training=False,
@@ -121,7 +114,6 @@ def imagenet_trainer_config():
             prefetch_buffer_size=4,
             data_dir=FLAGS.data_dir,
         )
-        evaler_cfg.summary_writer.dir = os.path.join(summary_dir, evaler_cfg.name)
     return cfg
 
 
@@ -139,9 +131,7 @@ def main(argv):
     if FLAGS.jax_profiler_port is not None:
         server = jax.profiler.start_server(FLAGS.jax_profiler_port)
 
-    logging.info("Creating trainer config")
     trainer_config = imagenet_trainer_config()
-    logging.info("Trainer config: %s", trainer_config.debug_string())
     run_trainer(trainer_config, FLAGS.mesh_shape)
 
 
