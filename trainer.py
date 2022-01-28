@@ -149,8 +149,8 @@ class SpmdTrainer(_SpmdRunner):
             out_axis_resources=None,
             donate_argnums=(0, 1),
         )
-        for evaler_cfg in cfg.evalers:
-            self._children[evaler_cfg.name].init(
+        for evaler_name in cfg.evalers:
+            self._children[evaler_name].init(
                 self.model, model_param_partition_specs
             )
 
@@ -260,9 +260,9 @@ class SpmdTrainer(_SpmdRunner):
         self.vlog(3, "  eval: %s", self.step)
         # Note: we will use the same eval key as the training keys of the future step, which should be okay.
         prng_key = self._state.prng_key
-        for evaler_cfg in cfg.evalers:
+        for evaler_name in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
-            self._children[evaler_cfg.name].run_step(
+            self._children[evaler_name].run_step(
                 self.step,
                 prng_key=eval_key,
                 model_params=self._state.model,
