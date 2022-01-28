@@ -227,10 +227,10 @@ class SpmdTrainer(_SpmdRunner):
         """
         cfg = self.config
         self.vlog(3, "  train_step: %s", self.step + 1)
-        with jax.profiler.trace(cfg.summary_writer.dir):
-            with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
-                # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
-                outputs = self._jit_train_step(self._state, input_batch)
+        # with jax.profiler.trace(cfg.summary_writer.dir):
+        with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
+            # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
+            outputs = self._jit_train_step(self._state, input_batch)
         self._state = outputs["state"]
         if self._state.step % 100 == 0:
             self._step_log(
