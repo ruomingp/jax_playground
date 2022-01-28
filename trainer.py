@@ -227,13 +227,11 @@ class SpmdTrainer(_SpmdRunner):
         """
         cfg = self.config
         self.vlog(3, "  train_step: %s", self.step + 1)
-        # Q: Should we use
-        # with jax.profiler.trace(cfg.summary_writer.dir):
-        # ?
-        with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
-            # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
-            outputs = self._jit_train_step(self._state, input_batch)
-            self._state = outputs["state"]
+        with jax.profiler.trace(cfg.summary_writer.dir):
+            with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
+                # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
+                outputs = self._jit_train_step(self._state, input_batch)
+        self._state = outputs["state"]
         if self._state.step % 100 == 0:
             self._step_log(
                 "loss=%s aux=%s",
@@ -355,9 +353,10 @@ class SpmdEvaler(_SpmdRunner):
         num_batches = 0
         for input_batch in self.input:
             prng_key, batch_key = jax.random.split(prng_key)
-            (_, aux), output_collection = self._jit_eval_batch(
-                batch_key, model_params, input_batch
-            )
+            with jax.profiler.StepTraceAnnotation(cfg.name, step_num=step):
+                (_, aux), output_collection = self._jit_eval_batch(
+                    batch_key, model_params, input_batch
+                )
             num_batches += 1
             self.vlog(
                 3,

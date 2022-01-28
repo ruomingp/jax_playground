@@ -41,7 +41,7 @@ class TfdsInput(Module):
         )
         cfg.define(
             "process_parallelism",
-            4,
+            16,
             "The number of parallel calls for processing examples.",
         )
         cfg.define(
