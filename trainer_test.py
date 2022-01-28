@@ -5,19 +5,23 @@ from typing import Optional
 import jax
 import jax.random
 import numpy as np
-import optax
 from absl import flags, logging
 from absl.testing import absltest, parameterized
+from jax import numpy as jnp
 from jax.experimental import maps
 from jax.experimental import mesh_utils
 
 import config as config_lib
+import layers
 import learner
-import resnet
-from module import Module
+import param_init
+from checkpointer import Checkpointer
+from module import BaseLayer, Module, Tensor
 from trainer import SpmdTrainer, SpmdEvaler
 
 FLAGS = flags.FLAGS
+
+NUM_CLASSES = 16
 
 
 class DummyInput(Module):
@@ -45,8 +49,8 @@ class DummyInput(Module):
         cfg = self.config
         self._num_batches += 1
         if (
-            cfg.total_num_batches is not None
-            and self._num_batches > cfg.total_num_batches
+                cfg.total_num_batches is not None
+                and self._num_batches > cfg.total_num_batches
         ):
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
@@ -59,9 +63,33 @@ class DummyInput(Module):
                 dtype=np.int32,
             ),
             label=jax.random.randint(
-                label_key, shape=[cfg.batch_size], minval=0, maxval=1000, dtype=np.int32
+                label_key, shape=[cfg.batch_size], minval=0, maxval=NUM_CLASSES, dtype=np.int32
             ),
         )
+
+
+class DummyModel(BaseLayer):
+
+    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
+        super().__init__(cfg, parent=parent)
+        cfg = self.config
+        self._add_child(
+            "fc",
+            layers.Linear.default_config().set(
+                input_dim=3,
+                output_dim=NUM_CLASSES,
+                bias=True,
+                param_partition_spec=(None, "model"),
+            ),
+        )
+
+    def forward(self, image: Tensor, label: Tensor):
+        # [batch, 3].
+        hidden = image.mean(axis=(1, 2))
+        logits: Tensor = self.fc(hidden)
+        loss = -(jax.nn.log_softmax(logits) * jax.nn.one_hot(label, NUM_CLASSES, dtype=logits.dtype)).sum(
+            axis=-1).mean()
+        return loss, {'prng_key': self.prng_key}
 
 
 class TrainerTest(parameterized.TestCase):
@@ -73,9 +101,8 @@ class TrainerTest(parameterized.TestCase):
     def testTrainer(self, platform, mesh_shape):
         trainer_dir = tempfile.mkdtemp()
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
-        cfg.model = resnet.ResNetModel.resnet18_config().set(
-            hidden_dim=16, num_blocks_per_stage=[1]
-        )
+        cfg.model = DummyModel.default_config().set(dtype=jnp.float32,
+                                                    param_init=param_init.DefaultInitializer.default_config())
         cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
             optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
@@ -95,7 +122,6 @@ class TrainerTest(parameterized.TestCase):
         cfg.checkpointer.write_every_n_steps = 5
         cfg.checkpointer.dir = os.path.join(trainer_dir, "checkpoints")
         cfg.summary_writer.dir = os.path.join(trainer_dir, "summaries", "train")
-        run_trainer = lambda: self._runTrainer(cfg, num_steps=11)
         devices = jax.devices()
         if not all(device.platform == platform for device in devices):
             logging.info(
@@ -104,17 +130,22 @@ class TrainerTest(parameterized.TestCase):
                 [device.platform for device in devices],
             )
             return
-        if platform == "cpu":
-            run_trainer()
-        else:
-            devices = mesh_utils.create_device_mesh(mesh_shape)
-            mesh = maps.Mesh(devices, ("data", "model"))
-            with maps.mesh(mesh.devices, mesh.axis_names):
-                run_trainer()
+        devices = mesh_utils.create_device_mesh(mesh_shape)
+        mesh = maps.Mesh(devices, ("data", "model"))
+        with maps.mesh(mesh.devices, mesh.axis_names):
+            trainer: SpmdTrainer = cfg.instantiate(parent=None)
+            output_a = trainer.run(prng_key=jax.random.PRNGKey(123), max_step=12)
 
-    def _runTrainer(self, cfg, num_steps):
-        trainer: SpmdTrainer = cfg.instantiate(parent=None)
-        trainer.run(prng_key=jax.random.PRNGKey(123), max_step=10)
+        ckpt: Checkpointer = Checkpointer.default_config().set(name='ckpt', dir=cfg.checkpointer.dir).instantiate(
+            parent=None)
+        restored_state = ckpt.restore(step=None, state=trainer._state)
+        self.assertEqual(10, restored_state.step)
+        with maps.mesh(mesh.devices, mesh.axis_names):
+            trainer: SpmdTrainer = cfg.instantiate(parent=None)
+            # Since we will be resuming from the checkpoint at step 10, a different prng_key doesn't matter.
+            output_b = trainer.run(prng_key=jax.random.PRNGKey(456), max_step=12)
+        # The prng_key per step is deterministic.
+        np.testing.assert_array_equal(output_a["aux"]["prng_key"], output_b["aux"]["prng_key"])
 
 
 if __name__ == "__main__":
