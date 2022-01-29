@@ -1,6 +1,8 @@
 """Image input modules.
 
 References:
+- https://github.com/pytorch/vision/blob/main/torchvision/prototype/models/resnet.py
+- https://github.com/pytorch/vision/blob/main/references/classification/presets.py
 - https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
 """
 import tensorflow as tf
@@ -73,7 +75,7 @@ class ImagenetInput(TfdsInput):
             # TOOD(ruoming): support random cropping.
             image = _random_crop(image)
             image = tf.image.random_flip_left_right(image)
-            image = tf.image.resize([image], cfg.image_size, method=tf.image.ResizeMethod.BICUBIC)[0]
+            image = tf.image.resize([image], cfg.image_size, method=tf.image.ResizeMethod.BILINEAR)[0]
         else:
             image = tf.image.resize([image], cfg.eval_resize, method=tf.image.ResizeMethod.BILINEAR)[0]
             image = _central_crop(image, cfg.image_size)
