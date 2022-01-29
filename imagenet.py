@@ -1,19 +1,20 @@
 """A launcher to train ResNet-18 on ImageNet.
 
 On the TPU VM:
-gs_bucket=permanent-us-central1-q5loch
-dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)
-data_dir=gs://${gs_bucket}/tensorflow_datasets
+    gs_bucket=permanent-us-central1-q5loch
+    dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)
+    data_dir=gs://${gs_bucket}/tensorflow_datasets
+    python3 imagenet.py --trainer_dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
 
-python3 imagenet.py --trainer_dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
-python3 imagenet.py \
-    --trainer_dir=${dir}_debug --data_dir=$data_dir --max_train_examples=1024 --max_eval_examples=160 \
-    2>&1 | tee log
+Or for debugging:
+    python3 imagenet.py \
+        --trainer_dir=${dir}_debug --data_dir=$data_dir --max_train_examples=1024 --max_eval_examples=160 \
+        2>&1 | tee log
 
 On your local machine:
-pip install tensorflow tbp-nightly
-gcloud auth application-default login
-tensorboard --logdir=$dir/summaries
+    pip install tensorflow tbp-nightly
+    gcloud auth application-default login
+    tensorboard --logdir=$dir/summaries
 """
 
 from absl import app, flags
@@ -24,7 +25,7 @@ import launch
 import learner
 import resnet
 import schedule
-from image import ImagenetInput
+from input_image import ImagenetInput
 from trainer import SpmdTrainer, SpmdEvaler
 
 flags.DEFINE_string(

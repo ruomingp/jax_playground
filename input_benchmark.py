@@ -63,7 +63,7 @@ import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
-from image import ImagenetInput
+from input_image import ImagenetInput
 
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
