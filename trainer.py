@@ -158,7 +158,7 @@ class SpmdTrainer(_SpmdRunner):
                 self._input_sharding(),
             ),
             out_axis_resources=None,
-            donate_argnums=(0, 1),
+            donate_argnums=(0,),  # donate the state
         )
         for evaler_name in cfg.evalers:
             self._children[evaler_name].init(
@@ -259,8 +259,7 @@ class SpmdTrainer(_SpmdRunner):
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(self._state, input_batch)
-            del input_batch  # donated
-        self._state = outputs["state"]
+            self._state = outputs["state"]
         if self._state.step % 100 == 0:
             self._step_log(
                 "loss=%s aux=%s",
@@ -363,7 +362,6 @@ class SpmdEvaler(_SpmdRunner):
                 self._input_sharding(),
             ),
             out_axis_resources=None,
-            donate_argnums=(0, 2),
         )
 
     def eval_step(
@@ -386,7 +384,6 @@ class SpmdEvaler(_SpmdRunner):
                 (_, aux), output_collection = self._jit_eval_batch(
                     batch_key, model_params, input_batch
                 )
-                del batch_key, input_batch  # donated
             num_batches += 1
             self.vlog(
                 3,
