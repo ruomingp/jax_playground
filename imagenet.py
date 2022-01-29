@@ -95,10 +95,10 @@ def imagenet_trainer_config() -> config_lib.InstantiableConfig:
 
     # Evaluation.
     def evaler_config(split_name: str, max_examples: Optional[int] = None):
-        if max_examples is not None:
-            max_examples = min(max_examples, FLAGS.max_eval_examples)
-        else:
+        if max_examples is None:
             max_examples = FLAGS.max_eval_examples
+        elif FLAGS.max_eval_examples is not None:
+            max_examples = min(max_examples, FLAGS.max_eval_examples)
         evaler_input = ImagenetInput.default_config().set(
             split=make_split(split_name, max_examples),
             is_training=False,
