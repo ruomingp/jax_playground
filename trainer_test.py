@@ -49,8 +49,8 @@ class DummyInput(Module):
         cfg = self.config
         self._num_batches += 1
         if (
-            cfg.total_num_batches is not None
-            and self._num_batches > cfg.total_num_batches
+                cfg.total_num_batches is not None
+                and self._num_batches > cfg.total_num_batches
         ):
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
@@ -92,24 +92,34 @@ class DummyModel(BaseLayer):
         logits: Tensor = self.fc(hidden)
         loss = (
             -(
-                jax.nn.log_softmax(logits)
-                * jax.nn.one_hot(label, NUM_CLASSES, dtype=logits.dtype)
+                    jax.nn.log_softmax(logits)
+                    * jax.nn.one_hot(label, NUM_CLASSES, dtype=logits.dtype)
             )
-            .sum(axis=-1)
-            .mean()
+                .sum(axis=-1)
+                .mean()
         )
         return loss, {"prng_key": self.prng_key}
 
 
 class TrainerTest(parameterized.TestCase):
     @parameterized.parameters(
+        ("cpu", None),
         ("cpu", (1, 1)),
         ("tpu", (8, 1)),
         ("tpu", (2, 4)),
     )
     def testTrainer(self, platform, mesh_shape):
-        trainer_dir = tempfile.mkdtemp()
+        devices = jax.devices()
+        if not all(device.platform == platform for device in devices):
+            logging.info(
+                "Skipping test for %s on %s",
+                platform,
+                [device.platform for device in devices],
+            )
+            return
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
+        cfg.dir = tempfile.mkdtemp()
+        cfg.mesh_shape = mesh_shape
         cfg.model = DummyModel.default_config().set(
             dtype=jnp.float32, param_init=param_init.DefaultInitializer.default_config()
         )
@@ -121,42 +131,24 @@ class TrainerTest(parameterized.TestCase):
                 weight_decay=1e-4,
             )
         )
-        evaler_cfg = SpmdEvaler.default_config().set(
-            name="eval_dummy",
+        cfg.evalers = dict(eval_dummy=SpmdEvaler.default_config().set(
             input=DummyInput.default_config().set(total_num_batches=2),
-        )
-        evaler_cfg.summary_writer.dir = os.path.join(
-            trainer_dir, "summaries", evaler_cfg.name
-        )
-        cfg.evalers = [evaler_cfg]
+        ))
         cfg.checkpointer.write_every_n_steps = 5
-        cfg.checkpointer.dir = os.path.join(trainer_dir, "checkpoints")
-        cfg.summary_writer.dir = os.path.join(trainer_dir, "summaries", "train")
-        devices = jax.devices()
-        if not all(device.platform == platform for device in devices):
-            logging.info(
-                "Skipping test for %s on %s",
-                platform,
-                [device.platform for device in devices],
-            )
-            return
-        devices = mesh_utils.create_device_mesh(mesh_shape)
-        mesh = maps.Mesh(devices, ("data", "model"))
-        with maps.mesh(mesh.devices, mesh.axis_names):
-            trainer: SpmdTrainer = cfg.instantiate(parent=None)
-            output_a = trainer.run(prng_key=jax.random.PRNGKey(123), max_step=12)
+        cfg.max_step = 12
+        trainer: SpmdTrainer = cfg.instantiate(parent=None)
+        output_a = trainer.run(prng_key=jax.random.PRNGKey(123))
 
         ckpt: Checkpointer = (
             Checkpointer.default_config()
-            .set(name="ckpt", dir=cfg.checkpointer.dir)
-            .instantiate(parent=None)
+                .set(name="ckpt", dir=trainer.checkpointer.config.dir)
+                .instantiate(parent=None)
         )
         restored_state = ckpt.restore(step=None, state=trainer._state)
         self.assertEqual(10, restored_state.step)
-        with maps.mesh(mesh.devices, mesh.axis_names):
-            trainer: SpmdTrainer = cfg.instantiate(parent=None)
-            # Since we will be resuming from the checkpoint at step 10, a different prng_key doesn't matter.
-            output_b = trainer.run(prng_key=jax.random.PRNGKey(456), max_step=12)
+        trainer: SpmdTrainer = cfg.instantiate(parent=None)
+        # Since we will be resuming from the checkpoint at step 10, a different prng_key doesn't matter.
+        output_b = trainer.run(prng_key=jax.random.PRNGKey(456))
         # The prng_key per step is deterministic.
         np.testing.assert_array_equal(
             output_a["aux"]["prng_key"], output_b["aux"]["prng_key"]

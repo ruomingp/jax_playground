@@ -1,7 +1,6 @@
 import numbers
 from typing import Any, Dict, Optional
 
-import guppy
 import jax
 from absl import logging
 from jax import numpy as jnp
@@ -21,11 +20,6 @@ class SummaryWriter(Module):
         cfg = super().default_config()
         cfg.define("dir", None, "The output directory.")
         cfg.define("write_every_n_steps", 1, "Writes summary every N steps.")
-        cfg.define(
-            "print_heap",
-            False,
-            "Whether print the heap profile when writing the summary.",
-        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
@@ -59,8 +53,3 @@ class SummaryWriter(Module):
 
             jax.tree_map(write, tree_paths(values, separator="/"), values)
             self.summary_writer.flush()
-
-        if cfg.print_heap:
-            logging.info("Collecting heap profile.")
-            h = guppy.hpy()
-            logging.info("Heapy: %s", h.heap())

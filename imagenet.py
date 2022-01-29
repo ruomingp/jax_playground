@@ -2,25 +2,25 @@
 
 On the TPU VM:
 gs_bucket=permanent-us-central1-q5loch
-dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)b
-echo $dir
+dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)
 data_dir=gs://${gs_bucket}/tensorflow_datasets
-echo $data_dir
-python3 imagenet.py --dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
+
+python3 imagenet.py --trainer_dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
+python3 imagenet.py \
+    --trainer_dir=${dir}_debug --data_dir=$data_dir --max_train_examples=1024 --max_eval_examples=160 \
+    2>&1 | tee log
 
 On your local machine:
 pip install tensorflow tbp-nightly
 gcloud auth application-default login
 tensorboard --logdir=$dir/summaries
 """
-import os.path
 
-from absl import app, flags, logging
-import jax  # jax must be imported before tensorflow!
-from jax.experimental import maps
-from jax.experimental import mesh_utils
+from absl import app, flags
+from typing import Optional
 
 import config as config_lib
+import launch
 import learner
 import resnet
 import schedule
@@ -28,38 +28,41 @@ from image import ImagenetInput
 from trainer import SpmdTrainer, SpmdEvaler
 
 flags.DEFINE_string(
-    "dir",
-    None,
-    "The root directory of the trainer. "
-    "Checkpoints will be stored in <dir>/checkpoints. "
-    "Summaries will be stored in <dir>/summaries.",
-    required=True,
-)
-flags.DEFINE_string(
     "data_dir",
     None,
     "The tfds directory. If None, uses ~/tensorflow_datasets.",
 )
-flags.DEFINE_list(
-    "mesh_shape", [8, 1], "The global device mesh shape for (data, model)."
-)
-flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
 flags.DEFINE_integer(
-    "interval", None, "If not None, the number of steps between ckpt and eval."
+    "max_train_examples", None, "If not None, the maximum number of training examples per epoch."
+)
+flags.DEFINE_integer(
+    "max_eval_examples", None,
+    "If not None, the maximum number of eval examples. "
+    "If there are more examples in an eval dataset, use only the first N examples."
 )
 
 FLAGS = flags.FLAGS
 
 
-def imagenet_trainer_config():
+def make_split(name: str, max_examples_per_split: Optional[int]) -> str:
+    if max_examples_per_split is None:
+        return name
+    return f"{name}[:{max_examples_per_split}]"
+
+
+def imagenet_trainer_config() -> config_lib.InstantiableConfig:
     num_train_examples = 1_281_167
+    train_split = "train"
+    if FLAGS.max_train_examples is not None:
+        num_train_examples = min(FLAGS.max_train_examples, num_train_examples)
+        train_split = make_split(train_split, num_train_examples)
+
     train_batch_size = 256
     eval_batch_size = 80  # divides 50_000 and can be divided by number of devices (8)
     steps_per_epoch = num_train_examples // train_batch_size
 
     cfg = SpmdTrainer.default_config()
     cfg.name = "imagenet_trainer"
-    cfg.dir = FLAGS.dir
 
     # Model and optimization.
     cfg.model = resnet.ResNetModel.resnet18_config()
@@ -74,11 +77,12 @@ def imagenet_trainer_config():
             weight_decay=1e-4,
         ),
     )
+    cfg.max_step = steps_per_epoch * 90
 
     # Training inputs.
     read_parallelism = 1
     cfg.input = ImagenetInput.default_config().set(
-        split="train",
+        split=train_split,
         is_training=True,
         global_batch_size=train_batch_size,
         data_dir=FLAGS.data_dir,
@@ -90,49 +94,32 @@ def imagenet_trainer_config():
     )
 
     # Evaluation.
-    evaler_train = SpmdEvaler.default_config().set(
-        input=ImagenetInput.default_config().set(
-            split="train[:160]" if FLAGS.interval else "train[0:50000]"
-        ),
-    )
-    evaler_validation = SpmdEvaler.default_config().set(
-        input=ImagenetInput.default_config().set(
-            split="validation[:160]" if FLAGS.interval else "validation"
-        ),
-    )
-    cfg.evalers = dict(eval_train=evaler_train, eval_validation=evaler_validation)
-
-    # Summaries and checkpoints.
-    cfg.checkpointer.write_every_n_steps = FLAGS.interval or steps_per_epoch
-    cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
-    cfg.summary_writer.write_every_n_steps = 100
-    for evaler_cfg in cfg.evalers.values():
-        evaler_cfg.run_every_n_steps = FLAGS.interval or steps_per_epoch
-        evaler_cfg.input.set(
+    def evaler_config(split_name: str, max_examples: Optional[int] = None):
+        if max_examples is not None:
+            max_examples = min(max_examples, FLAGS.max_eval_examples)
+        else:
+            max_examples = FLAGS.max_eval_examples
+        evaler_input = ImagenetInput.default_config().set(
+            split=make_split(split_name, max_examples),
             is_training=False,
             global_batch_size=eval_batch_size,
             prefetch_buffer_size=4,
             data_dir=FLAGS.data_dir,
         )
+        evaler_cfg = SpmdEvaler.default_config().set(input=evaler_input, run_every_n_steps=steps_per_epoch)
+        return evaler_cfg
+
+    cfg.evalers = dict(eval_train=evaler_config("train", 50000), eval_validation=evaler_config("validation"))
+
+    # Summaries and checkpoints.
+    cfg.checkpointer.write_every_n_steps = steps_per_epoch
+    cfg.checkpointer.keep_every_n_steps = cfg.checkpointer.write_every_n_steps * 10
+    cfg.summary_writer.write_every_n_steps = 100
     return cfg
 
 
-def run_trainer(trainer_config, mesh_shape):
-    trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
-    prng_key = jax.random.PRNGKey(1)
-    devices = mesh_utils.create_device_mesh(mesh_shape)
-    mesh = maps.Mesh(devices, ("data", "model"))
-    with maps.mesh(mesh.devices, mesh.axis_names):
-        trainer.run(prng_key, max_step=(5004 * 2 if FLAGS.interval else 5004 * 90))
-
-
 def main(argv):
-    # Start jax.profiler for Tensorboard and profiling in open source.
-    if FLAGS.jax_profiler_port is not None:
-        server = jax.profiler.start_server(FLAGS.jax_profiler_port)
-
-    trainer_config = imagenet_trainer_config()
-    run_trainer(trainer_config, FLAGS.mesh_shape)
+    launch.launch_trainer(imagenet_trainer_config())
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import math
 import os.path
 import time
 from functools import partial
@@ -7,6 +8,8 @@ import jax
 from absl import logging
 from jax import numpy as jnp
 from jax.experimental import PartitionSpec
+from jax.experimental import maps
+from jax.experimental import mesh_utils
 from jax.experimental.pjit import pjit
 
 import checkpointer
@@ -79,7 +82,7 @@ class _SpmdRunner(Module):
 
 class _TrainerState(NamedTuple):
     step: Union[Tensor, NestedPartitionSpec]
-    prng_key: jax.random.KeyArray
+    prng_key: Union[jax.random.KeyArray, NestedPartitionSpec]
     model: Union[NestedTensor, NestedPartitionSpec]
     learner: Union[learner.LearnerState, NestedPartitionSpec]
 
@@ -89,9 +92,18 @@ class SpmdTrainer(_SpmdRunner):
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("dir", None,
+                   "(Required) "
                    "The trainer root dir. "
                    "By default, checkpoints will be written under {dir}/checkpoints/ "
                    "and summaries will be written under {dir}/summaries.")
+        cfg.define("max_step", math.inf, "The maximum number of steps.")
+        cfg.define("mesh_shape", None,
+                   "The device mesh shape in the form of a tuple of ints. "
+                   "Must have the same length as mesh_axis_names. "
+                   "Defaults to (jax.device_count(), 1), "
+                   "which represents a data-parallel mesh when the mesh axis names are ('data', 'model').")
+        cfg.define("mesh_axis_names", ("data", "model"),
+                   "The mesh axis names. The names can be referenced in ParameterSpec.partition_spec.")
         cfg.define("model", None, "The model config.")
         cfg.define("learner", None, "The learner config.")
         cfg.define(
@@ -107,7 +119,6 @@ class SpmdTrainer(_SpmdRunner):
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
-        logging.info("Trainer config:\n%s", cfg.debug_string())
         cfg.summary_writer.dir = cfg.summary_writer.dir or os.path.join(cfg.dir, "summaries", "train_train")
         super().__init__(cfg, parent=parent)
         cfg = self.config
@@ -170,35 +181,39 @@ class SpmdTrainer(_SpmdRunner):
             **kwargs,
         )
 
-    def run(self, prng_key: jax.random.KeyArray, max_step: int) -> NestedTensor:
+    def run(self, prng_key: jax.random.KeyArray) -> Optional[NestedTensor]:
+        cfg = self.config
         jax.config.update("jax_log_compiles", True)
-        self._step_log("Starting run up to step %s", max_step)
-        self._init(prng_key)
+        mesh_shape = cfg.mesh_shape or (jax.device_count(), 1)
+        devices = mesh_utils.create_device_mesh(mesh_shape)
+        mesh = maps.Mesh(devices, cfg.mesh_axis_names)
+        with maps.mesh(mesh.devices, mesh.axis_names):
+            self._init(prng_key)
 
-        if self.step >= max_step:
-            self._step_log("Reached max_step=%s. Stopping", max_step)
-            return None
+            if self.step >= cfg.max_step:
+                self._step_log("Already reached max_step=%s. Stopping", cfg.max_step)
+                return None
 
-        start_time = time.perf_counter()
-        num_steps = 0
-        output = None
-        for input_batch in self.input:
-            self.vlog(3, "Start step %s", self.step + 1)
-            output = self.run_step(input_batch)
-            self.vlog(3, "Done step %s", self.step)
-            num_steps += 1
-            if num_steps % 100 == 0:
-                now = time.perf_counter()
-                self._step_log(
-                    "Average step time: %s seconds", (now - start_time) / num_steps
-                )
-                num_steps = 0
-                start_time = now
-            if self.step >= max_step:
-                self._step_log("Reached max_step=%s. Stopping", max_step)
-                return output
-        self._step_log("Reached end of inputs. Stopping")
-        return output
+            start_time = time.perf_counter()
+            num_steps = 0
+            output = None
+            for input_batch in self.input:
+                self.vlog(3, "Start step %s", self.step + 1)
+                output = self._run_step(input_batch)
+                self.vlog(3, "Done step %s", self.step)
+                num_steps += 1
+                if num_steps % 100 == 0:
+                    now = time.perf_counter()
+                    self._step_log(
+                        "Average step time: %s seconds", (now - start_time) / num_steps
+                    )
+                    num_steps = 0
+                    start_time = now
+                if self.step >= cfg.max_step:
+                    self._step_log("Reached max_step=%s. Stopping", cfg.max_step)
+                    return output
+            self._step_log("Reached end of inputs. Stopping")
+            return output
 
     def _init(self, prng_key: jax.random.KeyArray):
         def _init_state(prng_key: jax.random.KeyArray):
@@ -229,7 +244,7 @@ class SpmdTrainer(_SpmdRunner):
         # Try to restore the latest checkpoint.
         self._state = self.checkpointer.restore(step=None, state=self._state)
 
-    def run_step(self, input_batch: NestedTensor) -> NestedTensor:
+    def _run_step(self, input_batch: NestedTensor) -> NestedTensor:
         """Runs a single training step.
 
         Args:
@@ -244,6 +259,7 @@ class SpmdTrainer(_SpmdRunner):
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(self._state, input_batch)
+            del input_batch  # donated
         self._state = outputs["state"]
         if self._state.step % 100 == 0:
             self._step_log(
@@ -262,7 +278,7 @@ class SpmdTrainer(_SpmdRunner):
         prng_key = self._state.prng_key
         for evaler_name in cfg.evalers:
             prng_key, eval_key = jax.random.split(prng_key)
-            self._children[evaler_name].run_step(
+            self._children[evaler_name].eval_step(
                 self.step,
                 prng_key=eval_key,
                 model_params=self._state.model,
@@ -347,10 +363,10 @@ class SpmdEvaler(_SpmdRunner):
                 self._input_sharding(),
             ),
             out_axis_resources=None,
-            donate_argnums=(0, 1, 2),
+            donate_argnums=(0, 2),
         )
 
-    def run_step(
+    def eval_step(
             self,
             step: int,
             *,
@@ -370,6 +386,7 @@ class SpmdEvaler(_SpmdRunner):
                 (_, aux), output_collection = self._jit_eval_batch(
                     batch_key, model_params, input_batch
                 )
+                del batch_key, input_batch  # donated
             num_batches += 1
             self.vlog(
                 3,
