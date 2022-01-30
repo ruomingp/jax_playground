@@ -4,6 +4,7 @@ References:
 - https://github.com/pytorch/vision/blob/main/torchvision/prototype/models/resnet.py
 - https://github.com/pytorch/vision/blob/main/references/classification/presets.py
 - https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
+- https://github.com/google-research/vision_transformer/blob/main/vit_jax/input_pipeline.py#L195-L241
 """
 import tensorflow as tf
 from absl import logging

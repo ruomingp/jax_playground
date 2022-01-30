@@ -40,6 +40,21 @@ class ConstantInitializer(Initializer):
         return jnp.full(shape=shape, fill_value=self._value, dtype=dtype)
 
 
+class GaussianInitializer(Initializer):
+    def __init__(self, std: float):
+        self._std = std
+
+    def initialize(
+        self,
+        name: str,
+        *,
+        prng_key: jax.random.KeyArray,
+        shape: Shape,
+        dtype: jnp.dtype,
+    ) -> jnp.ndarray:
+        return jax.random.normal(prng_key, shape=shape, dtype=dtype) * self._std
+
+
 class DefaultInitializer(config_lib.Configurable, Initializer):
     """The default initializer."""
 

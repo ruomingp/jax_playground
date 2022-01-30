@@ -1,4 +1,11 @@
-"""Attention layers with pjit partition specs."""
+"""Attention layers with pjit partition specs.
+
+On mask tensors:
+A mask tensor can have shape [batch, target_length, source_length] or [batch, num_heads, target_length, source_length].
+It can be a boolean tensor, where each True value represents that attention is masked for the corresponding position
+pair, or a float tensor, which will be added to the attention logits (therefore a -inf represents a masked position
+pair). mask=None represents an all-zero mask---no position pair is masked.
+"""
 
 import math
 from dataclasses import dataclass
@@ -45,8 +52,41 @@ def make_segment_mask(*, source_segments: Tensor, target_segments: Tensor) -> Te
     return jax.lax.ne(source_segments, target_segments)
 
 
+class LearnedPositionalEmbedding(BaseLayer):
+
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define("dim", 0, "Input feature dim.")
+        cfg.define("shape", (None,), "The sequence shape.")
+        cfg.param_partition_spec = (None, None, 'model')
+        # By default, initialize to Gaussian with std=1/sqrt(dim), e.g., 0.036 when dim=768.
+        #
+        # This is the same as:
+        # https://github.com/pytorch/fairseq/blob/master/fairseq/modules/positional_embedding.py#L26
+        #
+        # BERT uses std=0.02 regardless of dim:
+        # https://github.com/google-research/bert/blob/eedf5716ce1268e56f0a50264a88cafad334ac61/modeling.py#L492-L495
+        cfg.param_init = param_init.DefaultInitializer.default_config().set(fan='fan_out', distribution='normal')
+        return cfg
+
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
+        cfg = self.config
+        return dict(
+            weight=ParameterSpec(
+                shape=[1] + list(cfg.shape) + [cfg.dim],
+                partition_spec=cfg.param_partition_spec,
+            )
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        emb = self.parameters["weight"]
+        assert x.shape[1:] == emb.shape[1:], f"Invalid input shape: {x.shape} vs. {emb.shape}"
+        return emb
+
+
 def t5_relative_position_bucket(
-    relative_position, *, bidirectional=True, num_buckets=32, max_distance=128
+        relative_position, *, bidirectional=True, num_buckets=32, max_distance=128
 ):
     """Computes relative position buckets with the T5 algorithm.
 
@@ -86,9 +126,9 @@ def t5_relative_position_bucket(
 
     # The other half of the buckets are for logarithmically bigger bins in positions up to max_distance
     relative_position_if_large = max_exact + (
-        jnp.log(relative_position.astype(jnp.float32) / max_exact)
-        / math.log(max_distance / max_exact)
-        * (num_buckets - max_exact)
+            jnp.log(relative_position.astype(jnp.float32) / max_exact)
+            / math.log(max_distance / max_exact)
+            * (num_buckets - max_exact)
     ).astype(jnp.int32)
     relative_position_if_large = jnp.minimum(
         # relative_position_if_large, jnp.full_like(relative_position_if_large, num_buckets - 1)
@@ -207,9 +247,7 @@ def masked_softmax(logits: Tensor, mask: Optional[Tensor] = None):
 
     Args:
         logits: a Tensor of any shape.
-        mask: a mask Tensor that is broadcastable with logits. It can be a boolean tensor, where each True value
-              represents that attention is masked for the corresponding position pair, or a float tensor, which will
-              be added to the attention logits (therefore a -inf represents a masked logit).
+        mask: a mask Tensor that is broadcastable with logits. See ``On mask tensors`` in the file comments.
 
     Returns:
         A Tensor of same shape as logits.
@@ -269,10 +307,10 @@ class MultiheadAttention(BaseLayer):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         for name, dim in (
-            ("q", cfg.query_dim),
-            ("k", cfg.key_dim),
-            ("v", cfg.value_dim),
-            ("o", self.output_dim()),
+                ("q", cfg.query_dim),
+                ("k", cfg.key_dim),
+                ("v", cfg.value_dim),
+                ("o", self.output_dim()),
         ):
             proj_cfg = cfg.output_linear if name == "o" else cfg.input_linear
             proj_cfg.model_dim = dim
@@ -302,12 +340,12 @@ class MultiheadAttention(BaseLayer):
         probs: Tensor
 
     def forward(
-        self,
-        query: Tensor,
-        *,
-        key: Tensor,
-        value: Tensor,
-        mask: Optional[Tensor] = None,
+            self,
+            query: Tensor,
+            *,
+            key: Tensor,
+            value: Tensor,
+            mask: Optional[Tensor] = None,
     ) -> Output:
         """Computes attention for the given query, key, value, and mask.
 
@@ -315,10 +353,7 @@ class MultiheadAttention(BaseLayer):
             query: a Tensor of shape [batch, target_length, target_dim].
             key:   a Tensor of shape [batch, source_length, source_dim].
             value: a Tensor of shape [batch, source_length, source_dim].
-            mask:  a mask Tensor of shape [batch, target_length, source_length] or [batch, num_heads, target_length,
-                source_length]. It can be a boolean tensor, where each True value represents that attention is masked
-                for the corresponding position pair, or a float tensor, which will be added to the attention logits
-                (therefore a -inf represents a masked position pair).
+            mask:  See ``On mask tensors`` in the file comments.
 
         Returns:
             An Output instance, where .data is of the same shape as query and .probs is of shape
@@ -391,11 +426,11 @@ class TransformerAttentionLayer(BaseLayer):
         probs: Tensor
 
     def forward(
-        self,
-        *,
-        target: Tensor,
-        source: Optional[Tensor] = None,
-        mask: Optional[Tensor] = None,
+            self,
+            *,
+            target: Tensor,
+            source: Optional[Tensor] = None,
+            mask: Optional[Tensor] = None,
     ):
         """Computes attention with target as query and source as key and value.
 
@@ -403,7 +438,7 @@ class TransformerAttentionLayer(BaseLayer):
             target: a Tensor of shape [batch, target_length, target_dim].
             source: a Tensor of shape [batch, source_length, source_dim].
                 If None, uses norm(target) as source (self-attention)
-            mask: a mask Tensor of shape [batch, target_length, source_length].
+            mask: See ``On mask tensors`` in the file comments.
 
         Returns:
             An Output instance, where .data is of the same shape as target and .probs is of shape
@@ -554,12 +589,12 @@ class TransformerLayer(BaseLayer):
         cross_attention_probs: Optional[Tensor]
 
     def forward(
-        self,
-        data: Tensor,
-        *,
-        self_attention_mask: Optional[Tensor] = None,
-        cross_attention_data: Optional[Tensor] = None,
-        cross_attention_mask: Optional[Tensor] = None,
+            self,
+            data: Tensor,
+            *,
+            self_attention_mask: Optional[Tensor] = None,
+            cross_attention_data: Optional[Tensor] = None,
+            cross_attention_mask: Optional[Tensor] = None,
     ) -> Output:
         self_atten_outputs = self.self_attention(target=data, mask=self_attention_mask)
         data = self_atten_outputs.data
