@@ -94,8 +94,45 @@ class RMSNorm(BaseLayer):
         return x
 
 
+class GroupNorm(BaseLayer):
+    """https://arxiv.org/abs/1803.08494."""
+
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define("dim", 0, "Input feature dim. Required.")
+        cfg.define("num_groups", 0, "The number of groups.")
+        cfg.define("eps", 1e-8, "The epsilon.")
+        return cfg
+
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
+        cfg = self.config
+        return {
+            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+        }
+
+    def forward(self, x: Tensor) -> Tensor:
+        cfg = self.config
+        if cfg.num_groups <= 0 or cfg.dim % cfg.num_groups != 0:
+            raise ValueError(f"num_groups ({cfg.num_groups}) must divide dim ({cfg.dim})")
+        group_size = cfg.dim // cfg.num_groups
+        x_dtype = x.dtype
+        x = x.astype(jnp.float32)
+        # Reshape to [..., num_groups, group_size].
+        y = jnp.reshape(x, x.shape[:-1] + [cfg.num_groups, group_size])
+        # Reduce along spatial dims and group_size, but not along batch or num_groups.
+        reduction_axis = list(range(1, y.ndim - 2)) + [-1]
+        mean = jnp.mean(y, axis=reduction_axis, keepdims=True)
+        variance = jnp.mean((y - mean) ** 2, axis=reduction_axis, keepdims=True)
+        y = (y - mean) * jax.lax.rsqrt(variance + cfg.eps)
+        x = y.astype(x_dtype)
+        x = x * self.parameters["scale"] + self.parameters["bias"]
+        return x
+
+
 class BatchNorm(BaseLayer):
-    """Reference:"""
+    """https://arxiv.org/abs/1502.03167."""
 
     @classmethod
     def default_config(cls):
