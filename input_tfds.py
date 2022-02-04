@@ -83,9 +83,9 @@ class TfdsInput(Module):
             )
         batch_size = cfg.global_batch_size // jax.process_count()
         if jax.process_count() > 1:
-            split = tfds.even_splits(
-                split, n=jax.process_count(), drop_remainder=cfg.is_training
-            )[jax.process_index()]
+            split = tfds.even_splits(split, n=jax.process_count(), drop_remainder=cfg.is_training)[
+                jax.process_index()
+            ]
         read_parallelism = cfg.read_parallelism if cfg.is_training else 1
         decode_parallelism = cfg.decode_parallelism if cfg.is_training else 1
         process_parallelism = cfg.process_parallelism if cfg.is_training else 1

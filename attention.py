@@ -16,7 +16,7 @@ from jax import numpy as jnp
 
 import config as config_lib
 import param_init
-from layers import LayerNorm, Dropout, Linear, get_activation_fn
+from layers import Dropout, LayerNorm, Linear, get_activation_fn
 from module import BaseLayer, Module, ParameterSpec
 from utils import Tensor, check_numerics
 
@@ -53,13 +53,12 @@ def make_segment_mask(*, source_segments: Tensor, target_segments: Tensor) -> Te
 
 
 class LearnedPositionalEmbedding(BaseLayer):
-
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("dim", 0, "Input feature dim.")
         cfg.define("shape", (None,), "The sequence shape.")
-        cfg.param_partition_spec = (None, None, 'model')
+        cfg.param_partition_spec = (None, None, "model")
         # By default, initialize to Gaussian with std=1/sqrt(dim), e.g., 0.036 when dim=768.
         #
         # This is the same as:
@@ -67,7 +66,9 @@ class LearnedPositionalEmbedding(BaseLayer):
         #
         # BERT uses std=0.02 regardless of dim:
         # https://github.com/google-research/bert/blob/eedf5716ce1268e56f0a50264a88cafad334ac61/modeling.py#L492-L495
-        cfg.param_init = param_init.DefaultInitializer.default_config().set(fan='fan_out', distribution='normal')
+        cfg.param_init = param_init.DefaultInitializer.default_config().set(
+            fan="fan_out", distribution="normal"
+        )
         return cfg
 
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
@@ -86,7 +87,7 @@ class LearnedPositionalEmbedding(BaseLayer):
 
 
 def t5_relative_position_bucket(
-        relative_position, *, bidirectional=True, num_buckets=32, max_distance=128
+    relative_position, *, bidirectional=True, num_buckets=32, max_distance=128
 ):
     """Computes relative position buckets with the T5 algorithm.
 
@@ -115,9 +116,7 @@ def t5_relative_position_bucket(
         relative_buckets += (relative_position > 0).astype(jnp.int32) * num_buckets
         relative_position = jnp.abs(relative_position)
     else:
-        relative_position = -jnp.minimum(
-            relative_position, jnp.zeros_like(relative_position)
-        )
+        relative_position = -jnp.minimum(relative_position, jnp.zeros_like(relative_position))
     # now relative_position is in the range [0, inf)
 
     # half of the buckets are for exact increments in positions
@@ -126,9 +125,9 @@ def t5_relative_position_bucket(
 
     # The other half of the buckets are for logarithmically bigger bins in positions up to max_distance
     relative_position_if_large = max_exact + (
-            jnp.log(relative_position.astype(jnp.float32) / max_exact)
-            / math.log(max_distance / max_exact)
-            * (num_buckets - max_exact)
+        jnp.log(relative_position.astype(jnp.float32) / max_exact)
+        / math.log(max_distance / max_exact)
+        * (num_buckets - max_exact)
     ).astype(jnp.int32)
     relative_position_if_large = jnp.minimum(
         # relative_position_if_large, jnp.full_like(relative_position_if_large, num_buckets - 1)
@@ -136,9 +135,7 @@ def t5_relative_position_bucket(
         num_buckets - 1,
     )
 
-    relative_buckets += jnp.where(
-        is_small, relative_position, relative_position_if_large
-    )
+    relative_buckets += jnp.where(is_small, relative_position, relative_position_if_large)
     return relative_buckets
 
 
@@ -178,9 +175,7 @@ class _BaseMultiheadLinear(BaseLayer):
     def _config_for_linear_type(cls, linear_type: str):
         cfg = super().default_config()
         cfg.define("model_dim", 0, "Feature dim.")
-        cfg.define(
-            "num_heads", 0, "Number of attention heads. Must divide hidden_dim evenly."
-        )
+        cfg.define("num_heads", 0, "Number of attention heads. Must divide hidden_dim evenly.")
         cfg.define("per_head_dim", 0, "Dimension per head.")
         cfg.define("bias", True, "Whether the linear modules have biases.")
         # Shard the 'num_heads' axis by the 'model' dim of the mesh.
@@ -287,9 +282,7 @@ class MultiheadAttention(BaseLayer):
         cfg.define("value_dim", 0, "Input value feature dim.")
         cfg.define("output_dim", None, "Output feature dim. If None, use query_dim.")
         cfg.define("hidden_dim", None, "Hidden feature dim. If None, use query_dim.")
-        cfg.define(
-            "num_heads", 0, "Number of attention heads. Must divide hidden_dim evenly."
-        )
+        cfg.define("num_heads", 0, "Number of attention heads. Must divide hidden_dim evenly.")
         cfg.define(
             "input_linear",
             MultiheadInputLinear.default_config(),
@@ -307,10 +300,10 @@ class MultiheadAttention(BaseLayer):
         super().__init__(cfg, parent=parent)
         cfg = self.config
         for name, dim in (
-                ("q", cfg.query_dim),
-                ("k", cfg.key_dim),
-                ("v", cfg.value_dim),
-                ("o", self.output_dim()),
+            ("q", cfg.query_dim),
+            ("k", cfg.key_dim),
+            ("v", cfg.value_dim),
+            ("o", self.output_dim()),
         ):
             proj_cfg = cfg.output_linear if name == "o" else cfg.input_linear
             proj_cfg.model_dim = dim
@@ -327,9 +320,7 @@ class MultiheadAttention(BaseLayer):
         cfg = self.config
         hidden_dim = cfg.hidden_dim or cfg.query_dim
         if hidden_dim % cfg.num_heads != 0:
-            raise ValueError(
-                f"num_heads ({cfg.num_heads}) must divide hidden_dim ({hidden_dim})"
-            )
+            raise ValueError(f"num_heads ({cfg.num_heads}) must divide hidden_dim ({hidden_dim})")
         return hidden_dim // cfg.num_heads
 
     @dataclass
@@ -340,12 +331,12 @@ class MultiheadAttention(BaseLayer):
         probs: Tensor
 
     def forward(
-            self,
-            query: Tensor,
-            *,
-            key: Tensor,
-            value: Tensor,
-            mask: Optional[Tensor] = None,
+        self,
+        query: Tensor,
+        *,
+        key: Tensor,
+        value: Tensor,
+        mask: Optional[Tensor] = None,
     ) -> Output:
         """Computes attention for the given query, key, value, and mask.
 
@@ -386,9 +377,7 @@ class TransformerAttentionLayer(BaseLayer):
         cfg = super().default_config()
         cfg.define("target_dim", 0, "Input target feature dim.")
         cfg.define("source_dim", 0, "Input source feature dim.")
-        cfg.define(
-            "norm", LayerNorm.default_config(), "The normalization layer config."
-        )
+        cfg.define("norm", LayerNorm.default_config(), "The normalization layer config.")
         cfg.define(
             "attention",
             MultiheadAttention.default_config(),
@@ -426,11 +415,11 @@ class TransformerAttentionLayer(BaseLayer):
         probs: Tensor
 
     def forward(
-            self,
-            *,
-            target: Tensor,
-            source: Optional[Tensor] = None,
-            mask: Optional[Tensor] = None,
+        self,
+        *,
+        target: Tensor,
+        source: Optional[Tensor] = None,
+        mask: Optional[Tensor] = None,
     ):
         """Computes attention with target as query and source as key and value.
 
@@ -450,17 +439,13 @@ class TransformerAttentionLayer(BaseLayer):
             norm_target = self.norm(target)
             if source is None:
                 source = norm_target  # self attention
-            atten_output = self.attention(
-                query=norm_target, key=source, value=source, mask=mask
-            )
+            atten_output = self.attention(query=norm_target, key=source, value=source, mask=mask)
             data = skip_input + self.dropout(atten_output.data)
         elif cfg.structure == "postnorm":
             # This is the structure used by the original Transformer, BERT, and RoBERTa.
             if source is None:
                 source = target  # self attention
-            atten_output = self.attention(
-                query=target, key=source, value=source, mask=mask
-            )
+            atten_output = self.attention(query=target, key=source, value=source, mask=mask)
             # logging.info("atten_output=%s", atten_output.data[0, 0])
             # Post-norm: norm applied on the sum of input and attention output.
             data = self.norm(target + self.dropout(atten_output.data))
@@ -487,9 +472,7 @@ class TransformerFeedForwardLayer(BaseLayer):
             Linear.default_config().set(param_partition_spec=["model", None]),
             "Config for the second linear layer.",
         )
-        cfg.define(
-            "norm", LayerNorm.default_config(), "The normalization layer config."
-        )
+        cfg.define("norm", LayerNorm.default_config(), "The normalization layer config.")
         cfg.define("activation", "nn.relu", "The activation function.")
         cfg.define("dropout", Dropout.default_config(), "The dropout layer config.")
         cfg.define(
@@ -556,9 +539,7 @@ class TransformerLayer(BaseLayer):
             TransformerAttentionLayer.default_config(),
             "The self-attention layer config.",
         )
-        cfg.define(
-            "cross_attention", None, "If not None, the cross-attention layer config."
-        )
+        cfg.define("cross_attention", None, "If not None, the cross-attention layer config.")
         cfg.define(
             "feed_forward",
             TransformerFeedForwardLayer.default_config(),
@@ -575,9 +556,7 @@ class TransformerLayer(BaseLayer):
         )
         self._add_child("feed_forward", cfg.feed_forward.set(input_dim=cfg.input_dim))
         if cfg.cross_attention is not None:
-            self._add_child(
-                "cross_attention", cfg.cross_attention.set(target_dim=cfg.input_dim)
-            )
+            self._add_child("cross_attention", cfg.cross_attention.set(target_dim=cfg.input_dim))
 
     @dataclass
     class Output:
@@ -589,12 +568,12 @@ class TransformerLayer(BaseLayer):
         cross_attention_probs: Optional[Tensor]
 
     def forward(
-            self,
-            data: Tensor,
-            *,
-            self_attention_mask: Optional[Tensor] = None,
-            cross_attention_data: Optional[Tensor] = None,
-            cross_attention_mask: Optional[Tensor] = None,
+        self,
+        data: Tensor,
+        *,
+        self_attention_mask: Optional[Tensor] = None,
+        cross_attention_data: Optional[Tensor] = None,
+        cross_attention_mask: Optional[Tensor] = None,
     ) -> Output:
         self_atten_outputs = self.self_attention(target=data, mask=self_attention_mask)
         data = self_atten_outputs.data

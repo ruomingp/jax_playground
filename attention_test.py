@@ -1,9 +1,6 @@
-from typing import Any, Dict, Union
-
 import jax
 import numpy as np
 import torch
-from absl import logging
 from absl.testing import absltest
 from jax import nn
 from jax import numpy as jnp
@@ -11,19 +8,9 @@ from transformers.models.roberta import modeling_roberta as hf_roberta
 
 import attention
 import layers
-from attention import (
-    TransformerLayer,
-    TransformerAttentionLayer,
-)
-from module import Module, functional as F
-
-
-def _assert_allclose(a, b, atol=1e-6, rtol=1e-3):
-    np.testing.assert_allclose(a, b, atol=atol, rtol=rtol, err_msg=np.abs(a - b).max())
-
-
-def _shapes(nested_tensor):
-    return jax.tree_map(lambda x: x.shape, nested_tensor)
+from attention import TransformerAttentionLayer, TransformerLayer
+from module import functional as F
+from test_utils import as_torch_tensor, assert_allclose, parameters_from_torch_layer, shapes
 
 
 def _random_mask(prng_key, tgt_len, src_len):
@@ -33,9 +20,7 @@ def _random_mask(prng_key, tgt_len, src_len):
         +
         # Ensure that every tgt position attends to at least one src position, otherwise
         # torch_modules.MultiheadAttention will generate NaN.
-        nn.one_hot(
-            jax.random.randint(key2, minval=0, maxval=src_len, shape=[tgt_len]), src_len
-        )
+        nn.one_hot(jax.random.randint(key2, minval=0, maxval=src_len, shape=[tgt_len]), src_len)
     )
     return mask.astype(jnp.float32) * -1e30
 
@@ -185,9 +170,7 @@ class MultiheadAttentionTest(absltest.TestCase):
         )
         layer = cfg.instantiate(parent=None)
 
-        layer_params = layer.initialize_parameters_recursively(
-            prng_key=jax.random.PRNGKey(123)
-        )
+        layer_params = layer.initialize_parameters_recursively(prng_key=jax.random.PRNGKey(123))
         qkv_shapes = dict(
             weight=(model_dim, num_heads, per_head_dim), bias=(num_heads, per_head_dim)
         )
@@ -195,13 +178,11 @@ class MultiheadAttentionTest(absltest.TestCase):
             {
                 **{f"{x}_proj": qkv_shapes for x in ("q", "k", "v")},
                 **{
-                    "o_proj": dict(
-                        weight=(model_dim, num_heads, per_head_dim), bias=(model_dim,)
-                    ),
+                    "o_proj": dict(weight=(model_dim, num_heads, per_head_dim), bias=(model_dim,)),
                     "dropout": {},
                 },
             },
-            _shapes(layer_params),
+            shapes(layer_params),
         )
 
         batch_size, src_len, tgt_len = 2, 4, 6
@@ -222,87 +203,14 @@ class MultiheadAttentionTest(absltest.TestCase):
         self.assertTrue(jnp.all(jnp.isfinite(layer_output_data)), layer_output_data)
 
 
-def _to_jtensor(x: Union[jnp.ndarray, torch.Tensor, Dict[str, Any]]):
-    if isinstance(x, jnp.ndarray):
-        return x
-    if isinstance(x, torch.Tensor):
-        t = x  # type: torch.Tensor
-        return jnp.asarray(t.detach().numpy())
-    return jax.tree_map(_to_jtensor, x)
-
-
-def _parameters_from_layer_norm(src: torch.nn.LayerNorm):
-    return _to_jtensor(dict(scale=src.weight, bias=src.bias))
-
-
-def _parameters_from_roberta_attention(src: hf_roberta.RobertaAttention):
-    for name, param in src.named_parameters():
-        print(f"{name}: {param.shape}")
-    num_heads = src.self.num_attention_heads
-    per_head_dim = src.self.attention_head_size
-    results = {"attention": {}}
-    for src_proj, dst_proj in (
-        ("query", "q_proj"),
-        ("key", "k_proj"),
-        ("value", "v_proj"),
-    ):
-        dense = getattr(src.self, src_proj)
-        # Note that torch.nn.Linear.weight is (output_dim, input_dim), so we need to transpose it before reshaping.
-        dense_params = dict(
-            weight=dense.weight.transpose(0, 1).view(-1, num_heads, per_head_dim),
-            bias=dense.bias.view(num_heads, per_head_dim),
-        )
-        results["attention"][dst_proj] = dense_params
-    output_dense = src.output.dense
-    results["attention"]["o_proj"] = dict(
-        weight=output_dense.weight.view(-1, num_heads, per_head_dim),
-        bias=output_dense.bias,
-    )
-    results["norm"] = _parameters_from_layer_norm(src.output.LayerNorm)
-    return _to_jtensor(results)
-
-
-def _parameters_from_dense(dense: torch.nn.Linear):
-    return _to_jtensor(dict(weight=dense.weight.transpose(0, 1), bias=dense.bias))
-
-
-def _parameters_from_roberta_feed_forward(
-    intermediate: hf_roberta.RobertaIntermediate, output: hf_roberta.RobertaOutput
-):
-    return _to_jtensor(
-        dict(
-            linear1=_parameters_from_dense(intermediate.dense),
-            linear2=_parameters_from_dense(output.dense),
-            norm=_parameters_from_layer_norm(output.LayerNorm),
-        )
-    )
-
-
-def _parameters_from_roberta_layer(src: hf_roberta.RobertaLayer):
-    return _to_jtensor(
-        dict(
-            self_attention=_parameters_from_roberta_attention(src.attention),
-            feed_forward=_parameters_from_roberta_feed_forward(
-                src.intermediate, src.output
-            ),
-        )
-    )
-
-
-def _as_torch_tensor(src: jnp.ndarray):
-    return torch.as_tensor(np.asarray(src).copy())
-
-
 class TransformerTest(absltest.TestCase):
     def _compare_against_roberta_attention(
         self, ref: hf_roberta.RobertaAttention, layer: TransformerAttentionLayer
     ):
-        layer_params = layer.initialize_parameters_recursively(
-            prng_key=jax.random.PRNGKey(0)
-        )
+        layer_params = layer.initialize_parameters_recursively(prng_key=jax.random.PRNGKey(0))
         layer_param_shapes = jax.tree_map(lambda x: x.shape, layer_params)
         print(f"layer state={layer_param_shapes}")
-        layer_params = _parameters_from_roberta_attention(ref)
+        layer_params = parameters_from_torch_layer(ref)
         batch_size, tgt_len = 2, 6
         model_dim, num_heads = layer.config.target_dim, layer.config.attention.num_heads
         rng = np.random.default_rng(seed=123)
@@ -319,13 +227,13 @@ class TransformerTest(absltest.TestCase):
                 is_training=True,
                 prng_key=jax.random.PRNGKey(0),
             )
-            attn_mask = None if mask is None else _as_torch_tensor(mask)
+            attn_mask = None if mask is None else as_torch_tensor(mask)
             (ref_outputs,) = ref.forward(
                 torch.as_tensor(target, dtype=torch.float32),
                 attention_mask=attn_mask,
                 output_attentions=False,
             )
-            _assert_allclose(layer_outputs.data, ref_outputs.detach().numpy())
+            assert_allclose(layer_outputs.data, ref_outputs.detach().numpy())
 
     def testAgainstRobertaAttention(self):
         model_dim = 16
@@ -349,15 +257,11 @@ class TransformerTest(absltest.TestCase):
         ref = hf_roberta.RobertaAttention(roberta_config)
         self._compare_against_roberta_attention(ref, layer)
 
-    def _compare_against_roberta_layer(
-        self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer
-    ):
-        layer_params = layer.initialize_parameters_recursively(
-            prng_key=jax.random.PRNGKey(0)
-        )
+    def _compare_against_roberta_layer(self, ref: hf_roberta.RobertaLayer, layer: TransformerLayer):
+        layer_params = layer.initialize_parameters_recursively(prng_key=jax.random.PRNGKey(0))
         layer_param_shapes = jax.tree_map(lambda x: x.shape, layer_params)
         print(f"layer state={layer_param_shapes}")
-        layer_params = _parameters_from_roberta_layer(ref)
+        layer_params = parameters_from_torch_layer(ref)
         batch_size, tgt_len = 2, 6
         model_dim, num_heads = (
             layer.config.input_dim,
@@ -383,13 +287,13 @@ class TransformerTest(absltest.TestCase):
                     "atten_probs"
                 ].shape,
             )
-            attn_mask = None if mask is None else _as_torch_tensor(mask)
+            attn_mask = None if mask is None else as_torch_tensor(mask)
             (ref_outputs,) = ref.forward(
                 torch.as_tensor(target, dtype=torch.float32),
                 attention_mask=attn_mask,
                 output_attentions=False,
             )
-            _assert_allclose(layer_outputs.data, ref_outputs.detach().numpy())
+            assert_allclose(layer_outputs.data, ref_outputs.detach().numpy())
 
     def testAgainstRobertaLayer(self):
         model_dim = 16

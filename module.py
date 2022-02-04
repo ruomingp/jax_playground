@@ -173,9 +173,7 @@ class Module(config_lib.Configurable):
         if level <= self.config.vlog:
             logging.info(msg, *args, **kwargs)
 
-    def _add_child(
-        self, name: str, child_config: config_lib.Config, **kwargs
-    ) -> "Module":
+    def _add_child(self, name: str, child_config: config_lib.Config, **kwargs) -> "Module":
         if not re.fullmatch("^[a-z][a-z0-9_]*$", name):
             raise ValueError(f'Invalid child name "{name}"')
         child_config = copy.deepcopy(child_config)
@@ -191,6 +189,10 @@ class Module(config_lib.Configurable):
             raise ValueError(f"Child {name} already exists")
         self._children[name] = module
         return module
+
+    @property
+    def children(self):
+        return self._children
 
     def get_invocation_context(self):
         context = current_context()

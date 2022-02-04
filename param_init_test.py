@@ -11,9 +11,7 @@ from param_init import DefaultInitializer
 class DefaultInitTest(absltest.TestCase):
     def testBias(self):
         init: DefaultInitializer = DefaultInitializer.default_config().instantiate()
-        bias = init.initialize(
-            "bias", prng_key=jax.random.PRNGKey(1), shape=[4], dtype=jnp.float16
-        )
+        bias = init.initialize("bias", prng_key=jax.random.PRNGKey(1), shape=[4], dtype=jnp.float16)
         self.assertEqual(bias.dtype, jnp.float16)
         np.testing.assert_array_equal(bias, jnp.zeros_like(bias))
 
@@ -53,9 +51,7 @@ class DefaultInitTest(absltest.TestCase):
                     self.assertEqual(weight.dtype, jnp.float32)
                     expected_std = gain / math.sqrt(fan)
                     actual_std = np.std(weight)
-                    self.assertBetween(
-                        actual_std, expected_std / 1.5, expected_std * 1.5
-                    )
+                    self.assertBetween(actual_std, expected_std / 1.5, expected_std * 1.5)
 
 
 if __name__ == "__main__":

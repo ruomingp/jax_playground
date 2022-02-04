@@ -13,11 +13,10 @@ from module import (
     NestedParameterSpec,
     OutputCollection,
     ParameterSpec,
-    new_output_collection,
     current_context,
-    set_current_context,
-    functional as F,
 )
+from module import functional as F
+from module import new_output_collection, set_current_context
 
 
 class OutputCollectionTest(absltest.TestCase):
@@ -65,9 +64,7 @@ class InvocationContextTest(absltest.TestCase):
         )
         with set_current_context(context1):
             self.assertIs(current_context(), context1)
-            self.assertEqual(
-                current_context().state["x"], 1
-            )  # pytype: disable=attribute-error
+            self.assertEqual(current_context().state["x"], 1)  # pytype: disable=attribute-error
             module2 = new_test_module("test2")
             context2 = InvocationContext(
                 module=module2,
@@ -78,15 +75,11 @@ class InvocationContextTest(absltest.TestCase):
             )
             with set_current_context(context2):
                 self.assertIs(current_context(), context2)
-                self.assertEqual(
-                    current_context().state["x"], 2
-                )  # pytype: disable=attribute-error
+                self.assertEqual(current_context().state["x"], 2)  # pytype: disable=attribute-error
 
             # No longer in context2, but still in context1.
             self.assertIs(current_context(), context1)
-            self.assertEqual(
-                current_context().state["x"], 1
-            )  # pytype: disable=attribute-error
+            self.assertEqual(current_context().state["x"], 1)  # pytype: disable=attribute-error
 
 
 class TestLayer(BaseLayer):
@@ -129,9 +122,7 @@ class ModuleTest(absltest.TestCase):
         test_module: TestLayer = (
             TestLayer.default_config().set(name="test").instantiate(parent=None)
         )
-        state = test_module.initialize_parameters_recursively(
-            prng_key=jax.random.PRNGKey(456)
-        )
+        state = test_module.initialize_parameters_recursively(prng_key=jax.random.PRNGKey(456))
         self.assertEqual({"moving_mean": 1.0}, state)
         y, output_collection = jax.jit(partial(F, test_module, is_training=True))(
             prng_key=jax.random.PRNGKey(123), state=state, inputs=(jnp.asarray(5.0),)
@@ -146,9 +137,7 @@ class ModuleTest(absltest.TestCase):
         test_module: TestParentLayer = (
             TestParentLayer.default_config().set(name="test").instantiate(parent=None)
         )
-        state = test_module.initialize_parameters_recursively(
-            prng_key=jax.random.PRNGKey(456)
-        )
+        state = test_module.initialize_parameters_recursively(prng_key=jax.random.PRNGKey(456))
         self.assertEqual({"child": {"moving_mean": 1.0}}, state)
         y, output_collection = jax.jit(partial(F, test_module, is_training=True))(
             prng_key=jax.random.PRNGKey(123), state=state, inputs=(jnp.asarray(5.0),)

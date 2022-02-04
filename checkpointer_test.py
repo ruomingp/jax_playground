@@ -1,11 +1,12 @@
 import tempfile
 
-from absl import logging
-from jax import numpy as jnp
 import numpy as np
+from absl import logging
 from absl.testing import absltest
-from checkpointer import Checkpointer
+from jax import numpy as jnp
+
 import utils
+from checkpointer import Checkpointer
 
 
 class CheckpointerTest(absltest.TestCase):
@@ -21,12 +22,8 @@ class CheckpointerTest(absltest.TestCase):
     def testSaveAndRestore(self):
         cfg = Checkpointer.default_config().set(name="test", dir=tempfile.mkdtemp())
         ckpt: Checkpointer = cfg.instantiate(parent=None)
-        state0 = dict(
-            x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32)
-        )
-        state1 = dict(
-            x=jnp.ones([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32) + 1
-        )
+        state0 = dict(x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32))
+        state1 = dict(x=jnp.ones([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32) + 1)
 
         # Restoring from an empty dir returns the input state if step=None.
         self.assertNestedEqual(state0, ckpt.restore(step=None, state=state0))
@@ -52,18 +49,14 @@ class CheckpointerTest(absltest.TestCase):
         with self.assertRaisesRegex(KeyError, "z"):
             ckpt.restore(
                 step=None,
-                state=dict(
-                    x=jnp.zeros([], dtype=jnp.int32), z=jnp.ones([2], dtype=jnp.float32)
-                ),
+                state=dict(x=jnp.zeros([], dtype=jnp.int32), z=jnp.ones([2], dtype=jnp.float32)),
             )
 
         # When the given state has a different array shape: [3] instead of [2] for y.
         with self.assertRaisesRegex(ValueError, "checkpoint tree dtypes or shapes"):
             ckpt.restore(
                 step=None,
-                state=dict(
-                    x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([3], dtype=jnp.float32)
-                ),
+                state=dict(x=jnp.zeros([], dtype=jnp.int32), y=jnp.ones([3], dtype=jnp.float32)),
             )
 
         # When the given state has a different dict shape: [1] instead of [] for x.

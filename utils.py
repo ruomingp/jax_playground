@@ -17,9 +17,7 @@ def check_numerics(x: Tensor, msg_fmt: str = "", **msg_kwargs):
     """Checks that all elements in `x` are finite."""
     global enable_numeric_checks
     if enable_numeric_checks:
-        assert bool(
-            jnp.isfinite(x).all()
-        ), f"Check numerics {msg_fmt.format(**msg_kwargs)}: {x}"
+        assert bool(jnp.isfinite(x).all()), f"Check numerics {msg_fmt.format(**msg_kwargs)}: {x}"
     return x
 
 
@@ -51,9 +49,7 @@ def tree_paths(tree: NestedTree, separator="/") -> NestedTree:
         elif is_named_tuple(tree):
             return type(tree)(**visit(tree._asdict(), prefix))
         elif isinstance(tree, (list, tuple)):
-            return type(tree)(
-                [visit(v, _concat(prefix, k)) for k, v in enumerate(tree)]
-            )
+            return type(tree)([visit(v, _concat(prefix, k)) for k, v in enumerate(tree)])
         else:
             return prefix
 

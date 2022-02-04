@@ -8,8 +8,7 @@ import numpy as np
 from absl import flags, logging
 from absl.testing import absltest, parameterized
 from jax import numpy as jnp
-from jax.experimental import maps
-from jax.experimental import mesh_utils
+from jax.experimental import maps, mesh_utils
 
 import config as config_lib
 import layers
@@ -17,7 +16,7 @@ import learner
 import param_init
 from checkpointer import Checkpointer
 from module import BaseLayer, Module, Tensor
-from trainer import SpmdTrainer, SpmdEvaler
+from trainer import SpmdEvaler, SpmdTrainer
 
 FLAGS = flags.FLAGS
 
@@ -48,10 +47,7 @@ class DummyInput(Module):
     def __next__(self):
         cfg = self.config
         self._num_batches += 1
-        if (
-                cfg.total_num_batches is not None
-                and self._num_batches > cfg.total_num_batches
-        ):
+        if cfg.total_num_batches is not None and self._num_batches > cfg.total_num_batches:
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
         return dict(
@@ -91,12 +87,9 @@ class DummyModel(BaseLayer):
         hidden = image.mean(axis=(1, 2))
         logits: Tensor = self.fc(hidden)
         loss = (
-            -(
-                    jax.nn.log_softmax(logits)
-                    * jax.nn.one_hot(label, NUM_CLASSES, dtype=logits.dtype)
-            )
-                .sum(axis=-1)
-                .mean()
+            -(jax.nn.log_softmax(logits) * jax.nn.one_hot(label, NUM_CLASSES, dtype=logits.dtype))
+            .sum(axis=-1)
+            .mean()
         )
         return loss, {"prng_key": self.prng_key}
 
@@ -131,9 +124,11 @@ class TrainerTest(parameterized.TestCase):
                 weight_decay=1e-4,
             )
         )
-        cfg.evalers = dict(eval_dummy=SpmdEvaler.default_config().set(
-            input=DummyInput.default_config().set(total_num_batches=2),
-        ))
+        cfg.evalers = dict(
+            eval_dummy=SpmdEvaler.default_config().set(
+                input=DummyInput.default_config().set(total_num_batches=2),
+            )
+        )
         cfg.checkpointer.write_every_n_steps = 5
         cfg.max_step = 12
         trainer: SpmdTrainer = cfg.instantiate(parent=None)
@@ -141,8 +136,8 @@ class TrainerTest(parameterized.TestCase):
 
         ckpt: Checkpointer = (
             Checkpointer.default_config()
-                .set(name="ckpt", dir=trainer.checkpointer.config.dir)
-                .instantiate(parent=None)
+            .set(name="ckpt", dir=trainer.checkpointer.config.dir)
+            .instantiate(parent=None)
         )
         restored_state = ckpt.restore(step=None, state=trainer._state)
         self.assertEqual(10, restored_state.step)
@@ -150,9 +145,7 @@ class TrainerTest(parameterized.TestCase):
         # Since we will be resuming from the checkpoint at step 10, a different prng_key doesn't matter.
         output_b = trainer.run(prng_key=jax.random.PRNGKey(456))
         # The prng_key per step is deterministic.
-        np.testing.assert_array_equal(
-            output_a["aux"]["prng_key"], output_b["aux"]["prng_key"]
-        )
+        np.testing.assert_array_equal(output_a["aux"]["prng_key"], output_b["aux"]["prng_key"])
 
 
 if __name__ == "__main__":

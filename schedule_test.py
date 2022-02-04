@@ -1,9 +1,9 @@
 import math
 
 import jax
+import numpy as np
 from absl import logging
 from absl.testing import absltest
-import numpy as np
 
 import schedule
 from schedule import as_schedule_fn
@@ -28,17 +28,13 @@ class ScheduleTest(absltest.TestCase):
                 self.assertEqual(step / 10, value)
 
     def testSqrt(self):
-        s = schedule.polynomial(
-            power=0.5, begin_step=0, begin_value=0, end_step=100, end_value=10
-        )
+        s = schedule.polynomial(power=0.5, begin_step=0, begin_value=0, end_step=100, end_value=10)
         for step in range(10):
             value = s(step)
             np.testing.assert_allclose(math.sqrt(step / 100) * 10, value, atol=1e-6)
 
     def testExponential(self):
-        s = schedule.exponential(
-            begin_step=0, begin_value=1, end_step=100, end_value=0.01
-        )
+        s = schedule.exponential(begin_step=0, begin_value=1, end_step=100, end_value=0.01)
         self.assertAlmostEqual(1, s(0))
         self.assertAlmostEqual(0.1, s(50))
         self.assertAlmostEqual(0.01, s(100))

@@ -3,9 +3,9 @@ from typing import Callable, List, Union
 
 import jax
 from jax import numpy as jnp
-from utils import Tensor
 
 import config as config_lib
+from utils import Tensor
 
 ScheduleFn = Callable[[Tensor], Tensor]
 Schedule = Union[float, Tensor, ScheduleFn, config_lib.InstantiableConfig]
@@ -46,7 +46,7 @@ def polynomial(
     def fn(step: Tensor) -> Tensor:
         frac = (step - begin_step) / (end_step - begin_step)
         frac = jnp.minimum(1.0, jnp.maximum(0.0, frac))
-        return begin_value + (frac ** power) * (end_value - begin_value)
+        return begin_value + (frac**power) * (end_value - begin_value)
 
     return fn
 
@@ -118,9 +118,7 @@ def stepwise(sub: List[Schedule], start_step: List[int]) -> ScheduleFn:
     all_limit_steps = start_step + [-1]
 
     def fn(step: Tensor) -> Tensor:
-        values = [
-            s(jnp.maximum(0, step - start)) for s, start in zip(sub, all_start_steps)
-        ]
+        values = [s(jnp.maximum(0, step - start)) for s, start in zip(sub, all_start_steps)]
         activations = [
             jnp.logical_and(
                 jax.lax.le(start, step),
@@ -128,8 +126,6 @@ def stepwise(sub: List[Schedule], start_step: List[int]) -> ScheduleFn:
             ).astype(jnp.float32)
             for start, limit in zip(all_start_steps, all_limit_steps)
         ]
-        return sum(
-            [value * activation for value, activation in zip(values, activations)]
-        )
+        return sum([value * activation for value, activation in zip(values, activations)])
 
     return fn

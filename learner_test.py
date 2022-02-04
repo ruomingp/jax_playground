@@ -1,15 +1,17 @@
+from functools import partial
+
 import jax.nn
 import numpy as np
 import optax
 from absl.testing import absltest, parameterized
 from jax import numpy as jnp
-from functools import partial
 
 import schedule
 import utils
 from config import config_for_function
 from learner import Learner, LearnerState, sgd_optimizer
-from module import functional as F, OutputCollection, PartitionSpec
+from module import OutputCollection, PartitionSpec
+from module import functional as F
 
 
 class LearnerTest(parameterized.TestCase):
@@ -33,9 +35,7 @@ class LearnerTest(parameterized.TestCase):
 
         loss, grads = jax.value_and_grad(loss)(params)
         np.testing.assert_allclose(loss, 1.412078, atol=1e-6)
-        np.testing.assert_allclose(
-            grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6
-        )
+        np.testing.assert_allclose(grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6)
 
         updates, updated_state = sgd.update(grads, state=state, params=params)
         np.testing.assert_allclose(
@@ -70,9 +70,7 @@ class LearnerTest(parameterized.TestCase):
 
         loss, grads = jax.value_and_grad(loss)(params)
         np.testing.assert_allclose(loss, 1.412078, atol=1e-6)
-        np.testing.assert_allclose(
-            grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6
-        )
+        np.testing.assert_allclose(grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6)
 
         updated_params, output_collection = jax.jit(
             partial(

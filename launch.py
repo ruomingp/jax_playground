@@ -20,7 +20,7 @@ flags.DEFINE_integer(
     "trainer_prng_seed",
     0,
     "The seed for jax.random.PRNGKey(). "
-    "Used for initializing model parameters and pseudo-random number generation during training."
+    "Used for initializing model parameters and pseudo-random number generation during training.",
 )
 flags.DEFINE_integer("jax_profiler_port", None, "If not None, the profiler port.")
 

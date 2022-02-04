@@ -1,14 +1,11 @@
 """A simple test for pjit on TPU."""
-import tensorflow as tf
 import jax
 import jax.numpy as jnp
 import numpy as np
+import tensorflow as tf
 from absl import app
-from jax.experimental import PartitionSpec
-from jax.experimental import maps
-from jax.experimental import mesh_utils
-from jax.experimental.pjit import pjit
-from jax.experimental.pjit import with_sharding_constraint
+from jax.experimental import PartitionSpec, maps, mesh_utils
+from jax.experimental.pjit import pjit, with_sharding_constraint
 
 
 def main(argv):

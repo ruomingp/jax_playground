@@ -17,8 +17,9 @@ On your local machine:
     tensorboard --logdir=$dir/summaries
 """
 
-from absl import app, flags
 from typing import Optional
+
+from absl import app, flags
 
 import config as config_lib
 import launch
@@ -26,7 +27,7 @@ import learner
 import resnet
 import schedule
 from input_image import ImagenetInput
-from trainer import SpmdTrainer, SpmdEvaler
+from trainer import SpmdEvaler, SpmdTrainer
 
 flags.DEFINE_string(
     "data_dir",
@@ -37,9 +38,10 @@ flags.DEFINE_integer(
     "max_train_examples", None, "If not None, the maximum number of training examples per epoch."
 )
 flags.DEFINE_integer(
-    "max_eval_examples", None,
+    "max_eval_examples",
+    None,
     "If not None, the maximum number of eval examples. "
-    "If there are more examples in an eval dataset, use only the first N examples."
+    "If there are more examples in an eval dataset, use only the first N examples.",
 )
 
 FLAGS = flags.FLAGS
@@ -107,10 +109,14 @@ def imagenet_trainer_config() -> config_lib.InstantiableConfig:
             prefetch_buffer_size=4,
             data_dir=FLAGS.data_dir,
         )
-        evaler_cfg = SpmdEvaler.default_config().set(input=evaler_input, run_every_n_steps=steps_per_epoch)
+        evaler_cfg = SpmdEvaler.default_config().set(
+            input=evaler_input, run_every_n_steps=steps_per_epoch
+        )
         return evaler_cfg
 
-    cfg.evalers = dict(eval_train=evaler_config("train", 50000), eval_validation=evaler_config("validation"))
+    cfg.evalers = dict(
+        eval_train=evaler_config("train", 50000), eval_validation=evaler_config("validation")
+    )
 
     # Summaries and checkpoints.
     cfg.checkpointer.write_every_n_steps = steps_per_epoch

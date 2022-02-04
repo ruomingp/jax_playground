@@ -15,10 +15,9 @@ MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 
 
-def _random_crop(image: tf.Tensor,
-                 aspect_ratio_range=(0.75, 1.33),
-                 area_range=(0.08, 1.0),
-                 max_attempts=100):
+def _random_crop(
+    image: tf.Tensor, aspect_ratio_range=(0.75, 1.33), area_range=(0.08, 1.0), max_attempts=100
+):
     """Generates a randomly cropped image.
 
     Args:
@@ -39,11 +38,12 @@ def _random_crop(image: tf.Tensor,
     sample_distorted_bounding_box = tf.image.sample_distorted_bounding_box(
         tf.shape(image),
         bounding_boxes=bbox,
-        min_object_covered=0.,
+        min_object_covered=0.0,
         aspect_ratio_range=aspect_ratio_range,
         area_range=area_range,
         max_attempts=max_attempts,
-        use_image_if_no_bounding_boxes=True)
+        use_image_if_no_bounding_boxes=True,
+    )
     bbox_begin, bbox_size, _ = sample_distorted_bounding_box
     # Crop the image to the specified bounding box.
     return tf.slice(image, bbox_begin, bbox_size)
@@ -53,7 +53,9 @@ def _central_crop(image, image_size):
     image_height, image_width, image_channels = image.shape
     offset_height = ((image_height - image_size[0]) + 1) // 2
     offset_width = ((image_width - image_size[1]) + 1) // 2
-    return tf.slice(image, [offset_height, offset_width, 0], [image_size[0], image_size[1], image_channels])
+    return tf.slice(
+        image, [offset_height, offset_width, 0], [image_size[0], image_size[1], image_channels]
+    )
 
 
 class ImagenetInput(TfdsInput):
@@ -61,7 +63,9 @@ class ImagenetInput(TfdsInput):
     def default_config(cls):
         cfg = super().default_config()
         cfg.define("image_size", (224, 224), "The image size.")
-        cfg.define("eval_resize", (256, 256), "The image size to resize to during eval before cropping.")
+        cfg.define(
+            "eval_resize", (256, 256), "The image size to resize to during eval before cropping."
+        )
         cfg.dataset_name = "imagenet2012"
         cfg.shuffle_buffer_size = 1024  # to be tuned.
         return cfg
@@ -76,9 +80,13 @@ class ImagenetInput(TfdsInput):
             # TOOD(ruoming): support random cropping.
             image = _random_crop(image)
             image = tf.image.random_flip_left_right(image)
-            image = tf.image.resize([image], cfg.image_size, method=tf.image.ResizeMethod.BILINEAR)[0]
+            image = tf.image.resize([image], cfg.image_size, method=tf.image.ResizeMethod.BILINEAR)[
+                0
+            ]
         else:
-            image = tf.image.resize([image], cfg.eval_resize, method=tf.image.ResizeMethod.BILINEAR)[0]
+            image = tf.image.resize(
+                [image], cfg.eval_resize, method=tf.image.ResizeMethod.BILINEAR
+            )[0]
             image = _central_crop(image, cfg.image_size)
         image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
         image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)

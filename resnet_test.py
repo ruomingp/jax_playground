@@ -1,16 +1,17 @@
 import difflib
 
 import jax.random
-from jax import numpy as jnp
+import numpy as np
 import torch
 from absl import logging
 from absl.testing import absltest
+from jax import numpy as jnp
 from torchvision.models.resnet import resnet18
 
-import numpy as np
 import resnet
 import utils
-from module import NestedTensor, functional as F
+from module import NestedTensor
+from module import functional as F
 from resnet import ResNetModel
 
 
@@ -63,10 +64,7 @@ def params_from_resnet(ref: torch.nn.Module) -> NestedTensor:
     return {
         "conv1": params_from_conv(ref.conv1),
         "norm1": params_from_bn(ref.bn1),
-        **{
-            f"stage{i}": params_from_stage(getattr(ref, f"layer{i + 1}"))
-            for i in range(4)
-        },
+        **{f"stage{i}": params_from_stage(getattr(ref, f"layer{i + 1}")) for i in range(4)},
         "fc": params_from_linear(ref.fc),
     }
 
@@ -86,12 +84,9 @@ class ResNetTest(absltest.TestCase):
         for name, param in ref.named_parameters():
             logging.info("ref param: %s=%s", name, list(param.shape))
 
-        model_params = jax.tree_map(
-            lambda x: utils.as_tensor(x), params_from_resnet(ref)
-        )
+        model_params = jax.tree_map(lambda x: utils.as_tensor(x), params_from_resnet(ref))
         model_param_strs = [
-            f"{name}={list(param.shape)}"
-            for name, param in utils.flatten_items(model_params)
+            f"{name}={list(param.shape)}" for name, param in utils.flatten_items(model_params)
         ]
 
         self.assertEqual(
@@ -102,9 +97,7 @@ class ResNetTest(absltest.TestCase):
 
         batch_size = 2
         inputs = {
-            "image": np.random.uniform(-1, 1, [batch_size, 224, 224, 3]).astype(
-                np.float32
-            ),
+            "image": np.random.uniform(-1, 1, [batch_size, 224, 224, 3]).astype(np.float32),
             "label": np.random.randint(0, 999, [batch_size]).astype(np.int32),
         }
         (loss, aux), _ = F(
@@ -115,9 +108,7 @@ class ResNetTest(absltest.TestCase):
             inputs=jax.tree_map(lambda x: jnp.asarray(x), inputs),
         )
         ref.eval()
-        ref_logits = (
-            ref(torch.as_tensor(inputs["image"]).permute(0, 3, 1, 2)).detach().numpy()
-        )
+        ref_logits = ref(torch.as_tensor(inputs["image"]).permute(0, 3, 1, 2)).detach().numpy()
         np.testing.assert_allclose(aux["logits"], ref_logits, atol=1e-4, rtol=1e-3)
 
 

@@ -2,10 +2,10 @@ import collections
 import copy
 import dataclasses
 
-from jax import numpy as jnp
-import tensorflow_datasets as tfds
 import numpy as np
+import tensorflow_datasets as tfds
 from absl.testing import absltest
+from jax import numpy as jnp
 
 import config
 
@@ -45,18 +45,14 @@ class ConfigTest(absltest.TestCase):
         self.assertEqual(8, cfg.num_layers)
         self.assertEqual(128, cfg.hidden_dim)
         self.assertEqual([("hidden_dim", 128), ("num_layers", 8)], cfg.items())
-        self.assertEqual(
-            "\n".join(["hidden_dim: 128", "num_layers: 8"]), cfg.debug_string()
-        )
+        self.assertEqual("\n".join(["hidden_dim: 128", "num_layers: 8"]), cfg.debug_string())
         # UnknownFieldError.
         with self.assertRaisesRegex(
             config.UnknownFieldError, r"keys are \['hidden_dim', 'num_layers'\].*"
         ):
             cfg.vocab_size = 1024
         # When the unknown field is close enough to a defined field.
-        with self.assertRaisesRegex(
-            config.UnknownFieldError, r".*did you mean: \[num_layers\].*"
-        ):
+        with self.assertRaisesRegex(config.UnknownFieldError, r".*did you mean: \[num_layers\].*"):
             cfg.num_layer = 5
 
     def testValueTypes(self):
@@ -120,7 +116,7 @@ class ConfigTest(absltest.TestCase):
         @dataclasses.dataclass
         class dclass:
             int_val: int
-            str_val: 'str'
+            str_val: "str"
             type_val: np.dtype
 
         cfg.sub = dclass(int_val=123, str_val="str", type_val=np.float64)
@@ -193,9 +189,7 @@ class ConfigTest(absltest.TestCase):
         class Layer:
             def __init__(self, in_features: int, out_features: int, bias: bool = True):
                 self.params = {}
-                self.params["weight"] = np.random.normal(
-                    size=(in_features, out_features)
-                )
+                self.params["weight"] = np.random.normal(size=(in_features, out_features))
                 if bias:
                     self.params["bias"] = np.zeros(shape=(out_features,))
 
@@ -203,9 +197,7 @@ class ConfigTest(absltest.TestCase):
                 return self.params.items()
 
         cfg = config.config_for_class(Layer)
-        self.assertContainsSubset(
-            {"cls", "in_features", "out_features", "bias"}, cfg.keys()
-        )
+        self.assertContainsSubset({"cls", "in_features", "out_features", "bias"}, cfg.keys())
         self.assertEqual(cfg.cls, Layer)
         self.assertTrue(
             cfg.bias

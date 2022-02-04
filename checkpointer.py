@@ -62,9 +62,7 @@ class Checkpointer(Module):
             ckpt_dir=self.ckpt_dir, target=input_target, step=step
         )
         if state is not None:
-            diff = self._diff(
-                restored_target["dtypes_shapes"], input_target["dtypes_shapes"]
-            )
+            diff = self._diff(restored_target["dtypes_shapes"], input_target["dtypes_shapes"])
             if diff:
                 raise ValueError(
                     "Unable to restore checkpoint. A mismatch between the saved "

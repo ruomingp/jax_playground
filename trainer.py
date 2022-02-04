@@ -7,9 +7,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 import jax
 from absl import logging
 from jax import numpy as jnp
-from jax.experimental import PartitionSpec
-from jax.experimental import maps
-from jax.experimental import mesh_utils
+from jax.experimental import PartitionSpec, maps, mesh_utils
 from jax.experimental.pjit import pjit
 
 import checkpointer
@@ -17,7 +15,8 @@ import config as config_lib
 import learner
 import metrics
 import summary_writer
-from module import functional as F, Module, NestedTensor, NestedPartitionSpec
+from module import Module, NestedPartitionSpec, NestedTensor
+from module import functional as F
 from utils import Tensor, flatten_items, tree_paths
 
 
@@ -91,19 +90,28 @@ class SpmdTrainer(_SpmdRunner):
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
-        cfg.define("dir", None,
-                   "(Required) "
-                   "The trainer root dir. "
-                   "By default, checkpoints will be written under {dir}/checkpoints/ "
-                   "and summaries will be written under {dir}/summaries.")
+        cfg.define(
+            "dir",
+            None,
+            "(Required) "
+            "The trainer root dir. "
+            "By default, checkpoints will be written under {dir}/checkpoints/ "
+            "and summaries will be written under {dir}/summaries.",
+        )
         cfg.define("max_step", math.inf, "The maximum number of steps.")
-        cfg.define("mesh_shape", None,
-                   "The device mesh shape in the form of a tuple of ints. "
-                   "Must have the same length as mesh_axis_names. "
-                   "Defaults to (jax.device_count(), 1), "
-                   "which represents a data-parallel mesh when the mesh axis names are ('data', 'model').")
-        cfg.define("mesh_axis_names", ("data", "model"),
-                   "The mesh axis names. The names can be referenced in ParameterSpec.partition_spec.")
+        cfg.define(
+            "mesh_shape",
+            None,
+            "The device mesh shape in the form of a tuple of ints. "
+            "Must have the same length as mesh_axis_names. "
+            "Defaults to (jax.device_count(), 1), "
+            "which represents a data-parallel mesh when the mesh axis names are ('data', 'model').",
+        )
+        cfg.define(
+            "mesh_axis_names",
+            ("data", "model"),
+            "The mesh axis names. The names can be referenced in ParameterSpec.partition_spec.",
+        )
         cfg.define("model", None, "The model config.")
         cfg.define("learner", None, "The learner config.")
         cfg.define(
@@ -119,7 +127,9 @@ class SpmdTrainer(_SpmdRunner):
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
-        cfg.summary_writer.dir = cfg.summary_writer.dir or os.path.join(cfg.dir, "summaries", "train_train")
+        cfg.summary_writer.dir = cfg.summary_writer.dir or os.path.join(
+            cfg.dir, "summaries", "train_train"
+        )
         super().__init__(cfg, parent=parent)
         cfg = self.config
 
@@ -130,8 +140,9 @@ class SpmdTrainer(_SpmdRunner):
         self._add_child("checkpointer", cfg.checkpointer)
 
         for evaler_name, evaler_cfg in cfg.evalers.items():
-            evaler_cfg.summary_writer.dir = evaler_cfg.summary_writer.dir or os.path.join(cfg.dir, "summaries",
-                                                                                          evaler_name)
+            evaler_cfg.summary_writer.dir = evaler_cfg.summary_writer.dir or os.path.join(
+                cfg.dir, "summaries", evaler_name
+            )
             self._add_child(evaler_name, evaler_cfg)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
@@ -161,9 +172,7 @@ class SpmdTrainer(_SpmdRunner):
             donate_argnums=(0,),  # donate the state
         )
         for evaler_name in cfg.evalers:
-            self._children[evaler_name].init(
-                self.model, model_param_partition_specs
-            )
+            self._children[evaler_name].init(self.model, model_param_partition_specs)
 
     @property
     def step(self):
@@ -204,9 +213,7 @@ class SpmdTrainer(_SpmdRunner):
                 num_steps += 1
                 if num_steps % 100 == 0:
                     now = time.perf_counter()
-                    self._step_log(
-                        "Average step time: %s seconds", (now - start_time) / num_steps
-                    )
+                    self._step_log("Average step time: %s seconds", (now - start_time) / num_steps)
                     num_steps = 0
                     start_time = now
                 if self.step >= cfg.max_step:
@@ -264,14 +271,10 @@ class SpmdTrainer(_SpmdRunner):
             self._step_log(
                 "loss=%s aux=%s",
                 outputs["loss"],
-                jax.tree_map(
-                    lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]
-                ),
+                jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
             )
         self.vlog(3, "  summary_writer: %s", self.step)
-        self.summary_writer(
-            self.step, {"loss": outputs["loss"], **outputs["summaries"]}
-        )
+        self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
         self.vlog(3, "  eval: %s", self.step)
         # Note: we will use the same eval key as the training keys of the future step, which should be okay.
         prng_key = self._state.prng_key
@@ -287,9 +290,9 @@ class SpmdTrainer(_SpmdRunner):
         return {"loss": outputs["loss"], "aux": outputs["aux"]}
 
     def _train_step(
-            self,
-            state: _TrainerState,
-            input_batch: Dict[str, Any],
+        self,
+        state: _TrainerState,
+        input_batch: Dict[str, Any],
     ):
         new_prng_key, forward_key, learner_key = jax.random.split(state.prng_key, 3)
 
@@ -319,9 +322,7 @@ class SpmdTrainer(_SpmdRunner):
         updated_state = _TrainerState(
             step=state.step + 1,
             prng_key=new_prng_key,
-            model=_apply_updates(
-                updated_model_params, forward_output_collection.state_updates
-            ),
+            model=_apply_updates(updated_model_params, forward_output_collection.state_updates),
             learner=learner.LearnerState(**learner_output_collection.state_updates),
         )
         # TODO(ruoming): only retrieve summaries when necessary.
@@ -365,11 +366,11 @@ class SpmdEvaler(_SpmdRunner):
         )
 
     def eval_step(
-            self,
-            step: int,
-            *,
-            prng_key: jax.random.KeyArray,
-            model_params: NestedTensor,
+        self,
+        step: int,
+        *,
+        prng_key: jax.random.KeyArray,
+        model_params: NestedTensor,
     ):
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:

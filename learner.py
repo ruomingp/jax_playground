@@ -8,7 +8,7 @@ from absl import logging
 import config as config_lib
 import schedule
 import utils
-from module import Module, NestedTensor, NestedPartitionSpec, Tensor, current_context
+from module import Module, NestedPartitionSpec, NestedTensor, Tensor, current_context
 
 TransformPartitionSpecFn = Callable[[NestedPartitionSpec], NestedPartitionSpec]
 
@@ -106,12 +106,8 @@ class Learner(Module):
                 f"optimizer must be a PartitionedGradientTransformation: {cfg.optimizer}"
             )
 
-    def create_state_partition_specs(
-        self, model_param_partition_specs: NestedPartitionSpec
-    ):
-        return LearnerState(
-            optimizer=self.optimizer.partition(model_param_partition_specs)
-        )
+    def create_state_partition_specs(self, model_param_partition_specs: NestedPartitionSpec):
+        return LearnerState(optimizer=self.optimizer.partition(model_param_partition_specs))
 
     def init(self, model_params: NestedTensor) -> LearnerState:
         return LearnerState(optimizer=self.optimizer.init(model_params))

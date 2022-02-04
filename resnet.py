@@ -8,8 +8,8 @@ from jax import numpy as jnp
 import config as config_lib
 import layers
 import param_init
+from layers import BatchNorm, Conv2D, get_activation_fn
 from metrics import WeightedScalar
-from layers import Conv2D, BatchNorm, get_activation_fn
 from module import BaseLayer, Module
 
 Tensor = jnp.ndarray
@@ -109,9 +109,7 @@ class BasicBlock(BaseLayer):
         self._add_child("norm1", cfg.norm.set(dim=cfg.output_dim))
         self._add_child(
             "conv2",
-            cfg.conv.set(
-                strides=(1, 1), input_dim=cfg.output_dim, output_dim=cfg.output_dim
-            ),
+            cfg.conv.set(strides=(1, 1), input_dim=cfg.output_dim, output_dim=cfg.output_dim),
         )
         self._add_child("norm2", cfg.norm.set(dim=cfg.output_dim))
         if cfg.downsample is not None:

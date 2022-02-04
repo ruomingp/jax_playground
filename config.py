@@ -43,6 +43,7 @@ import types
 from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
+
 from utils import is_named_tuple
 
 
@@ -146,9 +147,7 @@ class Config:
             self.__dict__[name] = value
         else:
             if self._frozen:
-                raise FrozenConfigError(
-                    f"Trying to modify a frozen config: {name}={value}"
-                )
+                raise FrozenConfigError(f"Trying to modify a frozen config: {name}={value}")
             try:
                 self._fields[name].set_value(value)
             except KeyError:

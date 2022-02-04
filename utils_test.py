@@ -1,3 +1,5 @@
+from typing import Any, NamedTuple
+
 import jax
 import numpy as np
 import tensorflow as tf
@@ -6,7 +8,6 @@ from absl.testing import absltest
 from jax import numpy as jnp
 
 from utils import as_tensor, flatten_items, tree_paths
-from typing import Any, NamedTuple
 
 
 class Combo(NamedTuple):
@@ -30,9 +31,7 @@ class TreeUtilsTest(absltest.TestCase):
 
     def testFlattenItems(self):
         tree = {"a": 1, "b": [2, {"c": 3, "d": 4}]}
-        self.assertEqual(
-            [("a", 1), ("b/0", 2), ("b/1/c", 3), ("b/1/d", 4)], flatten_items(tree)
-        )
+        self.assertEqual([("a", 1), ("b/0", 2), ("b/1/c", 3), ("b/1/d", 4)], flatten_items(tree))
         self.assertEqual(
             [("a", 1), ("b.0", 2), ("b.1.c", 3), ("b.1.d", 4)],
             flatten_items(tree, separator="."),

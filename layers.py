@@ -6,8 +6,8 @@ import jax
 from jax import nn
 from jax import numpy as jnp
 
-from module import BaseLayer, NestedTensor, ParameterSpec, PartitionSpec
 import param_init
+from module import BaseLayer, NestedTensor, ParameterSpec, PartitionSpec
 from utils import Tensor, check_numerics
 
 
@@ -175,8 +175,7 @@ class BatchNorm(BaseLayer):
             )
             self.add_state_update(
                 "moving_variance",
-                cfg.decay * self.parameters["moving_variance"]
-                + (1 - cfg.decay) * variance,
+                cfg.decay * self.parameters["moving_variance"] + (1 - cfg.decay) * variance,
             )
         else:
             mean = self.parameters["moving_mean"]
@@ -229,9 +228,7 @@ class Conv2D(BaseLayer):
         cfg = super().default_config()
         cfg.define("window", (1, 1), "The convolution window.")
         cfg.define("strides", (1, 1), "The convolution strides.")
-        cfg.define(
-            "padding", ((0, 0), (0, 0)), "Paddings ((top, bottom), (left, right))."
-        )
+        cfg.define("padding", ((0, 0), (0, 0)), "Paddings ((top, bottom), (left, right)).")
         cfg.define("input_dim", 0, "Input feature dim.")
         cfg.define("output_dim", 0, "Output feature dim.")
         cfg.define("bias", True, "Whether to add a bias.")
@@ -261,13 +258,10 @@ class Conv2D(BaseLayer):
 
     def forward(self, x: Tensor) -> Tensor:
         cfg = self.config
-        return (
-            jax.lax.conv_general_dilated(
-                lhs=x,
-                rhs=self.parameters["weight"],
-                window_strides=cfg.strides,
-                dimension_numbers=("NHWC", "HWIO", "NHWC"),
-                padding=cfg.padding,
-            )
-            + self.parameters.get("bias", 0)
-        )
+        return jax.lax.conv_general_dilated(
+            lhs=x,
+            rhs=self.parameters["weight"],
+            window_strides=cfg.strides,
+            dimension_numbers=("NHWC", "HWIO", "NHWC"),
+            padding=cfg.padding,
+        ) + self.parameters.get("bias", 0)

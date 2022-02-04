@@ -1,5 +1,6 @@
 from absl.testing import absltest
-from metrics import WeightedScalar, MetricAccumulator
+
+from metrics import MetricAccumulator, WeightedScalar
 
 
 class MetricsTest(absltest.TestCase):

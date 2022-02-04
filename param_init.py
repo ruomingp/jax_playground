@@ -1,12 +1,10 @@
 """Modules for configurable parameter initialization."""
 
 import math
-from typing import Sequence, Tuple
+from typing import Any, Sequence, Tuple
 
 import jax.random
 from jax import numpy as jnp
-
-from typing import Any
 
 import config as config_lib
 
@@ -67,9 +65,7 @@ class DefaultInitializer(config_lib.Configurable, Initializer):
             "xavier",
             'How to compute the fan, supported values are "fan_in", "fan_out", and "xavier".',
         )
-        cfg.define(
-            "distribution", "uniform", 'Weight distribution: "uniform" or "normal".'
-        )
+        cfg.define("distribution", "uniform", 'Weight distribution: "uniform" or "normal".')
         return cfg
 
     def initialize(
@@ -85,9 +81,7 @@ class DefaultInitializer(config_lib.Configurable, Initializer):
         elif name.endswith("scale"):
             return jnp.ones(shape, dtype=dtype)
         elif name.endswith("weight"):
-            return self._initialize_weight(
-                name, prng_key=prng_key, shape=shape, dtype=dtype
-            )
+            return self._initialize_weight(name, prng_key=prng_key, shape=shape, dtype=dtype)
         else:
             raise NotImplementedError(f"Unsupported parameter name ({name})")
 
@@ -104,9 +98,7 @@ class DefaultInitializer(config_lib.Configurable, Initializer):
         std = cfg.gain / math.sqrt(fan)
         if cfg.distribution == "uniform":
             b = math.sqrt(3) * std
-            weight = jax.random.uniform(
-                prng_key, shape=shape, dtype=dtype, minval=-b, maxval=b
-            )
+            weight = jax.random.uniform(prng_key, shape=shape, dtype=dtype, minval=-b, maxval=b)
         elif cfg.distribution == "normal":
             weight = jax.random.normal(prng_key, shape=shape, dtype=dtype) * std
         else:
