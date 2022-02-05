@@ -189,6 +189,8 @@ class Trainer:
             if num_steps - 3 in FLAGS.start_trace_steps:
                 jax.profiler.stop_trace()
                 logging.info("Stopped tracing...")
+                if num_steps > max(FLAGS.start_trace_steps):
+                    break
             self._run_step(input_batch)
             num_steps += 1
 
