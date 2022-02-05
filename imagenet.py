@@ -11,6 +11,9 @@ Or for debugging:
         --trainer_dir=${dir}_debug --data_dir=$data_dir --max_train_examples=1024 --max_eval_examples=160 \
         2>&1 | tee log
 
+with FAKE inputs:
+    python3 imagenet.py --trainer_dir=${dir}_fake --data_dir=FAKE 2>&1 | tee log
+
 On your local machine:
     pip install tensorflow tbp-nightly
     gcloud auth application-default login
