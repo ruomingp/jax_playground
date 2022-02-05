@@ -131,7 +131,7 @@ class DummyInput:
 
 class SimpleModel:
 
-    def __init__(self, hidden_dim: int = 4 * 1024):
+    def __init__(self, hidden_dim: int = 2 * 1024):
         self.hidden_dim = hidden_dim
         self.num_classes = 1000
 
