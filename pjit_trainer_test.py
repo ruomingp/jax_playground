@@ -157,7 +157,7 @@ class Trainer:
         self._state = None
 
         model_param_partition_specs = self.model.parameter_partition_specs()
-        self._step_log("Model param partition: %s", model_param_partition_specs)
+        logging.info("Model param partition: %s", model_param_partition_specs)
         self._trainer_state_partition_specs = _TrainerState(
             step=None,
             model=model_param_partition_specs,
@@ -172,20 +172,6 @@ class Trainer:
             out_axis_resources=None,
             donate_argnums=(0, 1),
         )
-
-    @property
-    def step(self):
-        if self._state is None:
-            return 0
-        return self._state.step
-
-    def _step_log(self, msg, *args, **kwargs):
-        logging.info(
-            "process % 3d step % 8d] " + msg,
-            jax.process_index(),
-            self.step,
-            *args,
-            **kwargs)
 
     def run(self):
         jax.config.update('jax_log_compiles', True)
@@ -219,12 +205,11 @@ class Trainer:
             in_axis_resources=[],
             out_axis_resources=self._trainer_state_partition_specs,
         )
-        self._step_log("Initializing states")
+        logging.info("Initializing states")
         self._state = init_computation()
 
     def _run_step(self, input_batch: Any):
-        with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
-            # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
+        with jax.profiler.StepTraceAnnotation("train_step"):
             output, self._state = self._jit_train_step(self._state, input_batch)
 
     def _train_step(
