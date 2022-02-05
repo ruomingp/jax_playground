@@ -6,17 +6,21 @@ References:
 - https://github.com/google/flax/blob/main/examples/imagenet/input_pipeline.py
 - https://github.com/google-research/vision_transformer/blob/main/vit_jax/input_pipeline.py#L195-L241
 """
+import jax
+import numpy as np
 import tensorflow as tf
 from absl import logging
 
+import config as config_lib
 from input_tfds import TfdsInput
+from module import Module
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 
 
 def _random_crop(
-    image: tf.Tensor, aspect_ratio_range=(0.75, 1.33), area_range=(0.08, 1.0), max_attempts=100
+        image: tf.Tensor, aspect_ratio_range=(0.75, 1.33), area_range=(0.08, 1.0), max_attempts=100
 ):
     """Generates a randomly cropped image.
 
@@ -77,7 +81,6 @@ class ImagenetInput(TfdsInput):
         logging.info("image=%s", type(image))
         image = tf.cast(tf.convert_to_tensor(image), tf.float32)
         if cfg.is_training:
-            # TOOD(ruoming): support random cropping.
             image = _random_crop(image)
             image = tf.image.random_flip_left_right(image)
             image = tf.image.resize([image], cfg.image_size, method=tf.image.ResizeMethod.BILINEAR)[
@@ -91,3 +94,53 @@ class ImagenetInput(TfdsInput):
         image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
         image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
         return {"image": image, "label": example["label"]}
+
+
+class FakeImagenetInput(Module):
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define("global_batch_size", 0, "The global batch size.")
+        cfg.define(
+            "total_num_batches",
+            None,
+            "The total number of batches. If None, unlimited.",
+        )
+        return cfg
+
+    def __init__(self, cfg: config_lib.Config, *, parent=None):
+        super().__init__(cfg, parent=parent)
+        self._prng_key = jax.random.PRNGKey(1)
+        self._num_batches = 0
+
+    def __iter__(self):
+        self._num_batches = 0
+        return self
+
+    def __next__(self):
+        cfg = self.config
+        self._num_batches += 1
+        if cfg.total_num_batches is not None and self._num_batches > cfg.total_num_batches:
+            raise StopIteration()
+        self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
+        if cfg.global_batch_size % jax.process_count() != 0:
+            raise ValueError(
+                f"Global batch size ({cfg.global_batch_size}) "
+                f"must be divisible by process count ({jax.process_count()})")
+        batch_size = cfg.global_batch_size // jax.process_count()
+        return dict(
+            image=jax.random.randint(
+                image_key,
+                shape=[batch_size, 224, 224, 3],
+                minval=0,
+                maxval=256,
+                dtype=np.int32,
+            ),
+            label=jax.random.randint(
+                label_key,
+                shape=[batch_size],
+                minval=0,
+                maxval=1000,
+                dtype=np.int32,
+            ),
+        )

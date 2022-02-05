@@ -16,7 +16,7 @@ On your local machine:
     gcloud auth application-default login
     tensorboard --logdir=$dir/summaries
 """
-
+import logging
 from typing import Optional
 
 from absl import app, flags
@@ -26,13 +26,13 @@ import launch
 import learner
 import resnet
 import schedule
-from input_image import ImagenetInput
+from input_image import ImagenetInput, FakeImagenetInput
 from trainer import SpmdEvaler, SpmdTrainer
 
 flags.DEFINE_string(
     "data_dir",
     None,
-    "The tfds directory. If None, uses ~/tensorflow_datasets.",
+    "The tfds directory. If None, uses ~/tensorflow_datasets. If 'FAKE', uses fake inputs.",
 )
 flags.DEFINE_integer(
     "max_train_examples", None, "If not None, the maximum number of training examples per epoch."
@@ -84,17 +84,23 @@ def imagenet_trainer_config() -> config_lib.InstantiableConfig:
 
     # Training inputs.
     read_parallelism = 1
-    cfg.input = ImagenetInput.default_config().set(
-        split=train_split,
-        is_training=True,
-        global_batch_size=train_batch_size,
-        data_dir=FLAGS.data_dir,
-        read_parallelism=read_parallelism,
-        decode_parallelism=4,
-        process_parallelism=64,
-        prefetch_buffer_size=4,
-        shuffle_buffer_size=read_parallelism * 1024,
-    )
+    if FLAGS.data_dir == "FAKE":
+        logging.warning("Using FAKE inputs!")
+        cfg.input = FakeImagenetInput.default_config().set(
+            global_batch_size=train_batch_size,
+        )
+    else:
+        cfg.input = ImagenetInput.default_config().set(
+            split=train_split,
+            is_training=True,
+            global_batch_size=train_batch_size,
+            data_dir=FLAGS.data_dir,
+            read_parallelism=read_parallelism,
+            decode_parallelism=4,
+            process_parallelism=64,
+            prefetch_buffer_size=4,
+            shuffle_buffer_size=read_parallelism * 1024,
+        )
 
     # Evaluation.
     def evaler_config(split_name: str, max_examples: Optional[int] = None):
@@ -102,13 +108,19 @@ def imagenet_trainer_config() -> config_lib.InstantiableConfig:
             max_examples = FLAGS.max_eval_examples
         elif FLAGS.max_eval_examples is not None:
             max_examples = min(max_examples, FLAGS.max_eval_examples)
-        evaler_input = ImagenetInput.default_config().set(
-            split=make_split(split_name, max_examples),
-            is_training=False,
-            global_batch_size=eval_batch_size,
-            prefetch_buffer_size=4,
-            data_dir=FLAGS.data_dir,
-        )
+        if FLAGS.data_dir == "FAKE":
+            evaler_input = FakeImagenetInput.default_config().set(
+                global_batch_size=eval_batch_size,
+                total_num_batches=2,
+            )
+        else:
+            evaler_input = ImagenetInput.default_config().set(
+                split=make_split(split_name, max_examples),
+                is_training=False,
+                global_batch_size=eval_batch_size,
+                prefetch_buffer_size=4,
+                data_dir=FLAGS.data_dir,
+            )
         evaler_cfg = SpmdEvaler.default_config().set(
             input=evaler_input, run_every_n_steps=steps_per_epoch
         )
