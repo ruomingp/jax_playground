@@ -154,7 +154,7 @@ class Trainer:
         self.input = DummyInput()
         self.model = SimpleModel()
         self.optimizer = no_op_optimizer()
-        self._state = None
+        self._state: Optional[_TrainerState] = None
 
         model_param_partition_specs = self.model.parameter_partition_specs()
         logging.info("Model param partition: %s", model_param_partition_specs)
@@ -183,6 +183,7 @@ class Trainer:
                 logging.info("Start tracing...")
                 jax.profiler.start_trace(FLAGS.dir)
             if num_steps - 3 in FLAGS.start_trace_steps:
+                self._state.step.block_until_ready()
                 jax.profiler.stop_trace()
                 logging.info("Stopped tracing...")
                 if num_steps > max(FLAGS.start_trace_steps):
