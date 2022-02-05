@@ -1,7 +1,7 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-python3 pjit_trainer_test.py --dir=gs://permanent-us-central1-q5loch/r_pang_apple_com/experiments/pjit_trainer_test.c
+python3 pjit_trainer_test.py --dir=gs://permanent-us-central1-q5loch/r_pang_apple_com/experiments/pjit_trainer_test
 """
 
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
@@ -44,6 +44,47 @@ class PartitionedGradientTransformation(NamedTuple):
     init: optax.TransformInitFn
     update: optax.TransformUpdateFn
     partition: TransformPartitionSpecFn
+
+
+def chain(*elements):
+    base = optax.chain(
+        *[optax.GradientTransformation(init=e.init, update=e.update) for e in elements]
+    )
+
+    def partition(input_partition_spec):
+        return tuple(e.partition(input_partition_spec) for e in elements)
+
+    return PartitionedGradientTransformation(
+        init=base.init, update=base.update, partition=partition
+    )
+
+
+def trace_partition(
+    base: optax.GradientTransformation,
+) -> PartitionedGradientTransformation:
+    return PartitionedGradientTransformation(
+        init=base.init,
+        update=base.update,
+        partition=lambda partition_spec: optax.TraceState(trace=partition_spec),
+    )
+
+
+def replicate(base: optax.GradientTransformation) -> PartitionedGradientTransformation:
+    return PartitionedGradientTransformation(
+        init=base.init, update=base.update, partition=lambda partition_spec: None
+    )
+
+
+def sgd_optimizer(
+    learning_rate: float,
+    momentum: float = 0,
+    weight_decay: float = 0,
+) -> PartitionedGradientTransformation:
+    return chain(
+        trace_partition(optax.trace(decay=momentum)),
+        replicate(optax.add_decayed_weights(weight_decay)),
+        replicate(optax.scale(learning_rate)),
+    )
 
 
 def no_op_optimizer() -> PartitionedGradientTransformation:
@@ -153,7 +194,7 @@ class Trainer:
     def __init__(self):
         self.input = DummyInput()
         self.model = SimpleModel()
-        self.optimizer = no_op_optimizer()
+        self.optimizer = sgd_optimizer(learning_rate=0.1, momentum=0.9, weight_decay=1e-4)
         self._state: Optional[_TrainerState] = None
 
         model_param_partition_specs = self.model.parameter_partition_specs()
@@ -174,7 +215,6 @@ class Trainer:
         )
 
     def run(self):
-        jax.config.update('jax_log_compiles', True)
         self._init()
 
         num_steps = 0
@@ -188,7 +228,8 @@ class Trainer:
                 logging.info("Stopped tracing...")
                 if num_steps > max(FLAGS.start_trace_steps):
                     break
-            self._run_step(input_batch)
+            with jax.profiler.StepTraceAnnotation("train_step"):
+                _, self._state = self._jit_train_step(self._state, input_batch)
             num_steps += 1
 
     def _init(self):
@@ -208,10 +249,6 @@ class Trainer:
         )
         logging.info("Initializing states")
         self._state = init_computation()
-
-    def _run_step(self, input_batch: Any):
-        with jax.profiler.StepTraceAnnotation("train_step"):
-            output, self._state = self._jit_train_step(self._state, input_batch)
 
     def _train_step(
             self,
@@ -253,6 +290,7 @@ class Trainer:
 
 
 def main(argv):
+    jax.config.update('jax_log_compiles', True)
     trainer = Trainer()
     mesh_shape = (jax.device_count(), 1)
     devices = mesh_utils.create_device_mesh(mesh_shape)
