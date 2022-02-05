@@ -1,7 +1,7 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-python3 pjit_trainer_test.py --dir=gs://permanent-us-central1-q5loch/r_pang_apple_com/experiments/pjit_trainer_test
+python3 pjit_trainer_test.py --dir=gs://permanent-us-central1-q5loch/r_pang_apple_com/experiments/pjit_trainer_test.a
 """
 
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
@@ -162,9 +162,11 @@ class Trainer:
         num_steps = 0
         for input_batch in self.input:
             if num_steps in FLAGS.start_trace_steps:
+                logging.info("Start tracing...")
                 jax.profiler.start_trace(FLAGS.dir)
             if num_steps - 3 in FLAGS.start_trace_steps:
                 jax.profiler.stop_trace()
+                logging.info("Stopped tracing...")
             self._run_step(input_batch)
             num_steps += 1
 
