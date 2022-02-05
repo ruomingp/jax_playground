@@ -23,7 +23,6 @@ NestedTree = Union[Any, Dict[str, Any]]  # Union[Any, Dict[str, "NestedTree"]]
 NestedTensor = Union[Tensor, Dict[str, Any]]  # Union[Tensor, Dict[str, "NestedTensor"]]
 NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, Any]]]
 
-
 flags.DEFINE_string(
     "dir",
     None,
@@ -38,8 +37,8 @@ flags.DEFINE_list(
 
 FLAGS = flags.FLAGS
 
-
 TransformPartitionSpecFn = Callable[[NestedPartitionSpec], NestedPartitionSpec]
+
 
 class PartitionedGradientTransformation(NamedTuple):
     init: optax.TransformInitFn
@@ -76,12 +75,12 @@ class DummyInput:
         self._num_batches += 1
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
         return dict(
-            image=jax.random.randint(
+            image=jax.random.uniform(
                 image_key,
                 shape=[self._global_batch_size, 224, 224, 3],
-                minval=0,
-                maxval=256,
-                dtype=np.int32,
+                minval=-1,
+                maxval=1,
+                dtype=np.float32,
             ),
             label=jax.random.randint(
                 label_key, shape=[self._global_batch_size], minval=0, maxval=1000, dtype=np.int32
@@ -89,24 +88,47 @@ class DummyInput:
         )
 
 
-class DummyModel:
+class SimpleModel:
+
+    def __init__(self, hidden_dim: int = 1024):
+        self.hidden_dim = hidden_dim
+        self.num_classes = 1000
 
     def parameter_partition_specs(self) -> NestedPartitionSpec:
         return {
-            'scale': PartitionSpec(),
-            'bias': PartitionSpec(),
+            'conv': {
+                'weight': PartitionSpec(None, None, None, 'model'),
+                'bias': PartitionSpec('model'),
+            },
+            'fc': {
+                'weight': PartitionSpec('model', None),
+                'bias': PartitionSpec(),
+            },
         }
 
     def initialize_parameters_recursively(self) -> NestedTensor:
         return {
-            'scale': jnp.ones(shape=[], dtype=jnp.float32),
-            'bias': jnp.zeros(shape=[], dtype=jnp.float32),
+            'conv': {
+                'weight': jnp.ones(shape=[7, 7, 3, self.hidden_dim], dtype=jnp.float32),
+                'bias': jnp.zeros(shape=[self.hidden_dim], dtype=jnp.float32),
+            },
+            'fc': {
+                'weight': jnp.ones(shape=[self.hidden_dim, self.num_classes], dtype=jnp.float32),
+                'bias': jnp.zeros(shape=[self.num_classes], dtype=jnp.float32),
+            },
         }
 
     def forward(self, state: NestedTensor, image: Tensor, label: Tensor):
-        x = image.mean(axis=(1, 2, 3))
-        x = x * state['scale'] + state['bias']
-        loss = jnp.abs(x - label.astype(x.dtype)).mean()
+        x = jax.lax.conv_general_dilated(
+            lhs=image,
+            rhs=state["conv"]["weight"],
+            window_strides=(2, 2),
+            dimension_numbers=("NHWC", "HWIO", "NHWC"),
+            padding=((0, 0), (0, 0))
+        ) + state["conv"]["bias"]
+        x = x.mean(axis=(1, 2))
+        x = x @ state["fc"]["weight"] + state["fc"]['bias']
+        loss = (-jax.nn.log_softmax(x, axis=-1) * jax.nn.one_hot(label, num_classes=self.num_classes)).sum(-1).mean()
         return loss, {}
 
 
@@ -120,7 +142,7 @@ class Trainer:
 
     def __init__(self):
         self.input = DummyInput()
-        self.model = DummyModel()
+        self.model = SimpleModel()
         self.optimizer = no_op_optimizer()
         self._state = None
 
