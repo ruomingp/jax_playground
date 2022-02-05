@@ -1,7 +1,7 @@
 """A program to reproduce the OOM condition with Jax training.
 
 On the TPU VM:
-python3 pjit_trainer_test.py --dir=gs://permanent-us-central1-q5loch/r_pang_apple_com/experiments/pjit_trainer_test.a
+python3 pjit_trainer_test.py --dir=gs://permanent-us-central1-q5loch/r_pang_apple_com/experiments/pjit_trainer_test.c
 """
 
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
@@ -216,7 +216,8 @@ class Trainer:
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             output, self._state = self._jit_train_step(self._state, input_batch)
-        self._step_log("output=%s", output)
+        # Does _step_log cause slowness?
+        # self._step_log("output=%s", output)
 
     def _train_step(
             self,
