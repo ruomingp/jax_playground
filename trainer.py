@@ -124,6 +124,7 @@ class SpmdTrainer(_SpmdRunner):
             dict(),
             "A dict of evaler names to configs, each name must be non-empty.",
         )
+        cfg.define("start_trace_steps", [256, 512, 1024], "Steps to start profiler tracing.")
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
@@ -206,7 +207,19 @@ class SpmdTrainer(_SpmdRunner):
             start_time = time.perf_counter()
             num_steps = 0
             output = None
+            stop_trace_step = None
             for input_batch in self.input:
+                if self.step == stop_trace_step:
+                    assert output is not None
+                    jax.tree_map(lambda x: x.block_until_ready(), output)
+                    jax.profiler.stop_trace()
+                    self._step_log("Stopped profiler tracing")
+                    stop_trace_step = None
+                if self.step in cfg.start_trace_steps:
+                    assert stop_trace_step is None
+                    self._step_log("Start profiler tracing")
+                    jax.profiler.start_trace(cfg.summary_writer.dir)
+                    stop_trace_step = self.step + 3
                 self.vlog(3, "Start step %s", self.step + 1)
                 output = self._run_step(input_batch)
                 self.vlog(3, "Done step %s", self.step)
@@ -262,17 +275,19 @@ class SpmdTrainer(_SpmdRunner):
         """
         cfg = self.config
         self.vlog(3, "  train_step: %s", self.step + 1)
-        # with jax.profiler.trace(cfg.summary_writer.dir):
+
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             outputs = self._jit_train_step(self._state, input_batch)
             self._state = outputs["state"]
+
         if self._state.step % 100 == 0:
             self._step_log(
                 "loss=%s aux=%s",
                 outputs["loss"],
                 jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
             )
+
         self.vlog(3, "  summary_writer: %s", self.step)
         self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
         self.vlog(3, "  eval: %s", self.step)
