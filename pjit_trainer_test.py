@@ -90,13 +90,17 @@ class DummyInput:
 
 class SimpleModel:
 
-    def __init__(self, hidden_dim: int = 1024):
+    def __init__(self, hidden_dim: int = 4 * 1024):
         self.hidden_dim = hidden_dim
         self.num_classes = 1000
 
     def parameter_partition_specs(self) -> NestedPartitionSpec:
         return {
-            'conv': {
+            'conv1': {
+                'weight': PartitionSpec(None, None, None, 'model'),
+                'bias': PartitionSpec('model'),
+            },
+            'conv2': {
                 'weight': PartitionSpec(None, None, None, 'model'),
                 'bias': PartitionSpec('model'),
             },
@@ -108,8 +112,12 @@ class SimpleModel:
 
     def initialize_parameters_recursively(self) -> NestedTensor:
         return {
-            'conv': {
+            'conv1': {
                 'weight': jnp.ones(shape=[7, 7, 3, self.hidden_dim], dtype=jnp.float32),
+                'bias': jnp.zeros(shape=[self.hidden_dim], dtype=jnp.float32),
+            },
+            'conv2': {
+                'weight': jnp.ones(shape=[7, 7, self.hidden_dim, self.hidden_dim], dtype=jnp.float32),
                 'bias': jnp.zeros(shape=[self.hidden_dim], dtype=jnp.float32),
             },
             'fc': {
@@ -119,13 +127,15 @@ class SimpleModel:
         }
 
     def forward(self, state: NestedTensor, image: Tensor, label: Tensor):
-        x = jax.lax.conv_general_dilated(
-            lhs=image,
-            rhs=state["conv"]["weight"],
-            window_strides=(2, 2),
-            dimension_numbers=("NHWC", "HWIO", "NHWC"),
-            padding=((0, 0), (0, 0))
-        ) + state["conv"]["bias"]
+        x = image
+        for conv_name in ("conv1", "conv2"):
+            conv_state = state[conv_name]
+            x = jax.lax.conv_general_dilated(
+                lhs=x,
+                rhs=conv_state["weight"],
+                window_strides=(2, 2),
+                dimension_numbers=("NHWC", "HWIO", "NHWC"),
+                padding=((0, 0), (0, 0))) + conv_state["bias"]
         x = x.mean(axis=(1, 2))
         x = x @ state["fc"]["weight"] + state["fc"]['bias']
         loss = (-jax.nn.log_softmax(x, axis=-1) * jax.nn.one_hot(label, num_classes=self.num_classes)).sum(-1).mean()
@@ -216,8 +226,6 @@ class Trainer:
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             output, self._state = self._jit_train_step(self._state, input_batch)
-        # Does _step_log cause slowness?
-        # self._step_log("output=%s", output)
 
     def _train_step(
             self,
