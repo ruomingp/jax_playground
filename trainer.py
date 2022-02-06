@@ -55,7 +55,6 @@ class _SpmdRunner(Module):
         self._jit_compute = None
 
     def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
-        self.vlog(3, "Compiling computation %s", fn)
         if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
             fn = pjit(
                 fn,
@@ -71,7 +70,6 @@ class _SpmdRunner(Module):
                 [device.platform for device in jax.devices()],
             )
             fn = jax.jit(fn, **kwargs)
-        self.vlog(3, "Compiling computation done")
         return fn
 
     def _input_sharding(self):
@@ -147,13 +145,11 @@ class SpmdTrainer(_SpmdRunner):
             self._add_child(evaler_name, evaler_cfg)
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
-        self.vlog(3, "Model param specs: %s", self._model_param_specs)
         model_param_partition_specs = jax.tree_map(
             lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
         )
         for path, spec in flatten_items(model_param_partition_specs):
-            self.vlog(3, "Model param partition: %s=%s", path, spec)
-        self._step_log("Model param partition: %s", model_param_partition_specs)
+            self._step_log("Model param partition: %s=%s", path, spec)
         learner_state_partition_specs = self.learner.create_state_partition_specs(
             model_param_partition_specs
         )
@@ -192,7 +188,7 @@ class SpmdTrainer(_SpmdRunner):
             "%s process % 3d step % 8d] " + msg,
             self.path(),
             jax.process_index(),
-            0,  # self.step
+            self.step,
             *args,
             **kwargs,
         )
@@ -228,9 +224,7 @@ class SpmdTrainer(_SpmdRunner):
                     jax.profiler.start_trace(cfg.summary_writer.dir)
                     stop_trace_step = step + 3
                 step += 1
-                self.vlog(3, "Start step %s", step)
                 output = self._run_step(step, input_batch)
-                self.vlog(3, "Done step %s", step)
                 perf_steps += 1
                 if perf_steps % 100 == 0:
                     now = time.perf_counter()
@@ -284,9 +278,6 @@ class SpmdTrainer(_SpmdRunner):
         Returns:
             A dict containing 'loss' and 'aux' outputs.
         """
-        cfg = self.config
-        self.vlog(3, "  train_step: %s", step)
-
         with jax.profiler.StepTraceAnnotation("train", step_num=step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             self._state, outputs = self._jit_train_step(self._state, input_batch)
@@ -298,19 +289,15 @@ class SpmdTrainer(_SpmdRunner):
                 jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
             )
 
-        self.vlog(3, "  summary_writer: %s", step)
         self.summary_writer(step, {"loss": outputs["loss"], **outputs["summaries"]})
-        self.vlog(3, "  eval: %s", step)
         # Note: we will use the same eval key as the training keys of the future step, which should be okay.
         prng_key = self._state.prng_key
-        for evaler_name in cfg.evalers:
-            prng_key, eval_key = jax.random.split(prng_key)
-            self._children[evaler_name].eval_step(
+        for evaler in self.evalers:
+            prng_key = evaler.eval_step(
                 step,
-                prng_key=eval_key,
+                prng_key=prng_key,
                 model_params=self._state.model,
             )
-        self.vlog(3, "  checkpointer: %s", step)
         self.checkpointer.save(step=step, state=self._state)
         return {"loss": outputs["loss"], "aux": outputs["aux"]}
 
@@ -395,12 +382,10 @@ class SpmdEvaler(_SpmdRunner):
             *,
             prng_key: jax.random.KeyArray,
             model_params: NestedTensor,
-    ):
+    ) -> jax.random.KeyArray:
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:
-            return
-        self.vlog(3, "%s start at %s", self.path(), step)
-        prng_key, init_key = jax.random.split(prng_key)
+            return prng_key
         metric_accumulator = cfg.metric_accumulator.instantiate()
         num_batches = 0
         for input_batch in self.input:
@@ -430,4 +415,4 @@ class SpmdEvaler(_SpmdRunner):
             summaries,
         )
         self.summary_writer(step, summaries)
-        self.vlog(3, "%s done at %s", self.path(), step)
+        return prng_key
