@@ -211,7 +211,7 @@ class Trainer:
                 PartitionSpec("data"),
             ),
             out_axis_resources=None,
-            donate_argnums=(0, 1),
+            donate_argnums=0,  # donate self._state
         )
 
     def run(self):
