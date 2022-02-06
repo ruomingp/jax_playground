@@ -169,7 +169,12 @@ class SpmdTrainer(_SpmdRunner):
                 self._trainer_state_partition_specs,
                 self._input_sharding(),
             ),
-            out_axis_resources=None,
+            out_axis_resources=dict(
+                state=self._trainer_state_partition_specs,
+                summaries=None,
+                loss=None,
+                aux=None,
+            ),
             donate_argnums=(0,),  # donate the state
         )
         for evaler_name in cfg.evalers:
@@ -308,7 +313,7 @@ class SpmdTrainer(_SpmdRunner):
         self,
         state: _TrainerState,
         input_batch: Dict[str, Any],
-    ):
+    ) -> Dict[str, NestedTensor]:
         new_prng_key, forward_key, learner_key = jax.random.split(state.prng_key, 3)
 
         def _forward(model_parameters, forward_input_batch):
