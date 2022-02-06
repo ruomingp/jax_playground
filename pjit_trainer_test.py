@@ -87,20 +87,6 @@ def sgd_optimizer(
     )
 
 
-def no_op_optimizer() -> PartitionedGradientTransformation:
-    def no_op_update(updates, state, params):
-        logging.info("no_op_update: g=%s s=%s p=%s", updates, state, params)
-        updates = jax.tree_map(lambda x: jnp.zeros_like(x), params)
-        logging.info("no_op_update: u=%s", updates)
-        return updates, state
-
-    return PartitionedGradientTransformation(
-        init=lambda x: {},
-        update=no_op_update,
-        partition=lambda x: {},
-    )
-
-
 class DummyInput:
 
     def __init__(self):
@@ -210,7 +196,10 @@ class Trainer:
                 self._trainer_state_partition_specs,
                 PartitionSpec("data"),
             ),
-            out_axis_resources=None,
+            out_axis_resources=(
+                PartitionSpec(),
+                self._trainer_state_partition_specs,
+            ),
             donate_argnums=0,  # donate self._state
         )
 
