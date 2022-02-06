@@ -2,7 +2,7 @@
 
 On the TPU VM:
     gs_bucket=permanent-us-central1-q5loch
-    dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F).b
+    dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F).c
     data_dir=gs://${gs_bucket}/tensorflow_datasets
     python3 imagenet.py --trainer_dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
 
@@ -71,7 +71,7 @@ def imagenet_trainer_config() -> config_lib.InstantiableConfig:
     cfg.name = "imagenet_trainer"
 
     # Model and optimization.
-    cfg.model = resnet.ResNetModel.resnet18_config()
+    cfg.model = resnet.ResNetModel.resnet18_config().set(num_blocks_per_stage=[4, 4, 4, 4, 4])
     learning_rate = config_lib.config_for_function(schedule.stepwise).set(
         sub=[0.1, 0.01, 0.001],
         start_step=[steps_per_epoch * 30, steps_per_epoch * 60],
