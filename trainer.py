@@ -138,11 +138,12 @@ class SpmdTrainer(_SpmdRunner):
         cfg.checkpointer.dir = cfg.checkpointer.dir or os.path.join(cfg.dir, "checkpoints")
         self._add_child("checkpointer", cfg.checkpointer)
 
+        self._evalers = []
         for evaler_name, evaler_cfg in cfg.evalers.items():
             evaler_cfg.summary_writer.dir = evaler_cfg.summary_writer.dir or os.path.join(
                 cfg.dir, "summaries", evaler_name
             )
-            self._add_child(evaler_name, evaler_cfg)
+            self._evalers.append(self._add_child(evaler_name, evaler_cfg))
 
         self._model_param_specs = self.model.create_parameter_specs_recursively()
         model_param_partition_specs = jax.tree_map(
@@ -202,7 +203,7 @@ class SpmdTrainer(_SpmdRunner):
         with maps.mesh(mesh.devices, mesh.axis_names):
             self._init(prng_key)
 
-            step = self.step
+            step = self.step.item()
             if step >= cfg.max_step:
                 self._step_log("Already reached max_step=%s. Stopping", cfg.max_step)
                 return None
@@ -292,7 +293,7 @@ class SpmdTrainer(_SpmdRunner):
         self.summary_writer(step, {"loss": outputs["loss"], **outputs["summaries"]})
         # Note: we will use the same eval key as the training keys of the future step, which should be okay.
         prng_key = self._state.prng_key
-        for evaler in self.evalers:
+        for evaler in self._evalers:
             prng_key = evaler.eval_step(
                 step,
                 prng_key=prng_key,
