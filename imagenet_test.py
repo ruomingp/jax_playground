@@ -3,10 +3,10 @@
 On the TPU VM:
 python3 imagenet_test.py 2>&1 | tee /tmp/log
 """
-from absl import app, logging
+import guppy
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import guppy
+from absl import app, logging
 
 import utils
 
@@ -19,9 +19,7 @@ def _process_example(example):
     image = tf.cast(tf.convert_to_tensor(image), tf.float32)
     image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
     image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
-    image = tf.image.resize([image], (224, 224), method=tf.image.ResizeMethod.BICUBIC)[
-        0
-    ]
+    image = tf.image.resize([image], (224, 224), method=tf.image.ResizeMethod.BICUBIC)[0]
     image = tf.image.random_flip_left_right(image)
     return {"image": image, "label": example["label"]}
 

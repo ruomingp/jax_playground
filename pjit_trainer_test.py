@@ -9,12 +9,9 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 import jax
 import numpy as np
 import optax
-from absl import app, flags
-from absl import logging
+from absl import app, flags, logging
 from jax import numpy as jnp
-from jax.experimental import PartitionSpec
-from jax.experimental import maps
-from jax.experimental import mesh_utils
+from jax.experimental import PartitionSpec, maps, mesh_utils
 from jax.experimental.pjit import pjit
 
 Tensor = jnp.ndarray
@@ -29,11 +26,7 @@ flags.DEFINE_string(
     "The directory of the trainer profiles.",
     required=True,
 )
-flags.DEFINE_list(
-    "start_trace_steps",
-    [10, 20, 30],
-    "Steps on which we start profiler tracing."
-)
+flags.DEFINE_list("start_trace_steps", [10, 20, 30], "Steps on which we start profiler tracing.")
 
 FLAGS = flags.FLAGS
 
@@ -88,7 +81,6 @@ def sgd_optimizer(
 
 
 class DummyInput:
-
     def __init__(self):
         self._prng_key = jax.random.PRNGKey(1)
         self._global_batch_size = 256
@@ -116,40 +108,41 @@ class DummyInput:
 
 
 class SimpleModel:
-
     def __init__(self, hidden_dim: int = 2 * 1024):
         self.hidden_dim = hidden_dim
         self.num_classes = 1000
 
     def parameter_partition_specs(self) -> NestedPartitionSpec:
         return {
-            'conv1': {
-                'weight': PartitionSpec(None, None, None, 'model'),
-                'bias': PartitionSpec('model'),
+            "conv1": {
+                "weight": PartitionSpec(None, None, None, "model"),
+                "bias": PartitionSpec("model"),
             },
-            'conv2': {
-                'weight': PartitionSpec(None, None, None, 'model'),
-                'bias': PartitionSpec('model'),
+            "conv2": {
+                "weight": PartitionSpec(None, None, None, "model"),
+                "bias": PartitionSpec("model"),
             },
-            'fc': {
-                'weight': PartitionSpec('model', None),
-                'bias': PartitionSpec(),
+            "fc": {
+                "weight": PartitionSpec("model", None),
+                "bias": PartitionSpec(),
             },
         }
 
     def initialize_parameters_recursively(self) -> NestedTensor:
         return {
-            'conv1': {
-                'weight': jnp.ones(shape=[7, 7, 3, self.hidden_dim], dtype=jnp.float32),
-                'bias': jnp.zeros(shape=[self.hidden_dim], dtype=jnp.float32),
+            "conv1": {
+                "weight": jnp.ones(shape=[7, 7, 3, self.hidden_dim], dtype=jnp.float32),
+                "bias": jnp.zeros(shape=[self.hidden_dim], dtype=jnp.float32),
             },
-            'conv2': {
-                'weight': jnp.ones(shape=[7, 7, self.hidden_dim, self.hidden_dim], dtype=jnp.float32),
-                'bias': jnp.zeros(shape=[self.hidden_dim], dtype=jnp.float32),
+            "conv2": {
+                "weight": jnp.ones(
+                    shape=[7, 7, self.hidden_dim, self.hidden_dim], dtype=jnp.float32
+                ),
+                "bias": jnp.zeros(shape=[self.hidden_dim], dtype=jnp.float32),
             },
-            'fc': {
-                'weight': jnp.ones(shape=[self.hidden_dim, self.num_classes], dtype=jnp.float32),
-                'bias': jnp.zeros(shape=[self.num_classes], dtype=jnp.float32),
+            "fc": {
+                "weight": jnp.ones(shape=[self.hidden_dim, self.num_classes], dtype=jnp.float32),
+                "bias": jnp.zeros(shape=[self.num_classes], dtype=jnp.float32),
             },
         }
 
@@ -157,15 +150,23 @@ class SimpleModel:
         x = image
         for conv_name in ("conv1", "conv2"):
             conv_state = state[conv_name]
-            x = jax.lax.conv_general_dilated(
-                lhs=x,
-                rhs=conv_state["weight"],
-                window_strides=(2, 2),
-                dimension_numbers=("NHWC", "HWIO", "NHWC"),
-                padding=((0, 0), (0, 0))) + conv_state["bias"]
+            x = (
+                jax.lax.conv_general_dilated(
+                    lhs=x,
+                    rhs=conv_state["weight"],
+                    window_strides=(2, 2),
+                    dimension_numbers=("NHWC", "HWIO", "NHWC"),
+                    padding=((0, 0), (0, 0)),
+                )
+                + conv_state["bias"]
+            )
         x = x.mean(axis=(1, 2))
-        x = x @ state["fc"]["weight"] + state["fc"]['bias']
-        loss = (-jax.nn.log_softmax(x, axis=-1) * jax.nn.one_hot(label, num_classes=self.num_classes)).sum(-1).mean()
+        x = x @ state["fc"]["weight"] + state["fc"]["bias"]
+        loss = (
+            (-jax.nn.log_softmax(x, axis=-1) * jax.nn.one_hot(label, num_classes=self.num_classes))
+            .sum(-1)
+            .mean()
+        )
         return loss, {}
 
 
@@ -176,7 +177,6 @@ class _TrainerState(NamedTuple):
 
 
 class Trainer:
-
     def __init__(self):
         self.input = DummyInput()
         self.model = SimpleModel()
@@ -240,9 +240,9 @@ class Trainer:
         self._state = init_computation()
 
     def _train_step(
-            self,
-            state: _TrainerState,
-            input_batch: Dict[str, Any],
+        self,
+        state: _TrainerState,
+        input_batch: Dict[str, Any],
     ):
         def _forward(model_parameters, forward_input_batch):
             return self.model.forward(
@@ -255,18 +255,23 @@ class Trainer:
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
-        updates, updated_learner_state = self.optimizer.update(grads, state=state.learner, params=state.model)
+        updates, updated_learner_state = self.optimizer.update(
+            grads, state=state.learner, params=state.model
+        )
         updated_model = optax.apply_updates(state.model, updates)
         updated_state = _TrainerState(
-            step=state.step + 1,
-            model=updated_model,
-            learner=updated_learner_state
+            step=state.step + 1, model=updated_model, learner=updated_learner_state
         )
         return (loss, aux), updated_state
 
     def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
         if all(device.platform in ("tpu", "gpu") for device in jax.devices()):
-            fn = pjit(fn, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources, **kwargs)
+            fn = pjit(
+                fn,
+                in_axis_resources=in_axis_resources,
+                out_axis_resources=out_axis_resources,
+                **kwargs,
+            )
         else:
             logging.log_first_n(
                 logging.INFO,
@@ -279,7 +284,7 @@ class Trainer:
 
 
 def main(argv):
-    jax.config.update('jax_log_compiles', True)
+    jax.config.update("jax_log_compiles", True)
     trainer = Trainer()
     mesh_shape = (jax.device_count(), 1)
     devices = mesh_utils.create_device_mesh(mesh_shape)

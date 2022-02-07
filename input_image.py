@@ -20,7 +20,7 @@ STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 
 
 def _random_crop(
-        image: tf.Tensor, aspect_ratio_range=(0.75, 1.33), area_range=(0.08, 1.0), max_attempts=100
+    image: tf.Tensor, aspect_ratio_range=(0.75, 1.33), area_range=(0.08, 1.0), max_attempts=100
 ):
     """Generates a randomly cropped image.
 
@@ -123,10 +123,11 @@ class FakeImagenetInput(Module):
         if cfg.total_num_batches is not None and self._num_batches > cfg.total_num_batches:
             raise StopIteration()
         self._prng_key, image_key, label_key = jax.random.split(self._prng_key, 3)
-        if cfg.global_batch_size % jax.process_count() != 0:
+        if cfg.global_batch_size <= 0 or cfg.global_batch_size % jax.process_count() != 0:
             raise ValueError(
                 f"Global batch size ({cfg.global_batch_size}) "
-                f"must be divisible by process count ({jax.process_count()})")
+                f"must be positive and divisible by process count ({jax.process_count()})"
+            )
         batch_size = cfg.global_batch_size // jax.process_count()
         return dict(
             image=jax.random.randint(

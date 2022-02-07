@@ -1,7 +1,7 @@
-from absl import app
 import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
+from absl import app
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
@@ -12,9 +12,7 @@ def _process_example(example):
     image = tf.cast(tf.convert_to_tensor(image), tf.float32)
     image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
     image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
-    image = tf.image.resize([image], (224, 224), method=tf.image.ResizeMethod.BICUBIC)[
-        0
-    ]
+    image = tf.image.resize([image], (224, 224), method=tf.image.ResizeMethod.BICUBIC)[0]
     image = tf.image.random_flip_left_right(image)
     return {"image": image, "label": example["label"]}
 

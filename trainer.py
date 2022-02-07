@@ -78,7 +78,6 @@ class _SpmdRunner(Module):
 
 
 class _TrainerState(NamedTuple):
-    step: Union[Tensor, NestedPartitionSpec]
     prng_key: Union[jax.random.KeyArray, NestedPartitionSpec]
     model: Union[NestedTensor, NestedPartitionSpec]
     learner: Union[learner.LearnerState, NestedPartitionSpec]
@@ -122,7 +121,13 @@ class SpmdTrainer(_SpmdRunner):
             dict(),
             "A dict of evaler names to configs, each name must be non-empty.",
         )
-        cfg.define("start_trace_steps", [256, 512, 1024], "Steps to start profiler tracing.")
+        cfg.define(
+            "start_trace_steps",
+            [],
+            "At which steps to start profiler tracing. "
+            "Currently each trace will cover 3 consecutive training steps. "
+            "The start steps must therefore be at least 3 steps apart from each other.",
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
@@ -131,6 +136,9 @@ class SpmdTrainer(_SpmdRunner):
         )
         super().__init__(cfg, parent=parent)
         cfg = self.config
+
+        self._step = None
+        self._state = None
 
         self._add_child("model", cfg.model)
         self._add_child("learner", cfg.learner)
@@ -155,7 +163,6 @@ class SpmdTrainer(_SpmdRunner):
             model_param_partition_specs
         )
         self._trainer_state_partition_specs = _TrainerState(
-            step=None,
             prng_key=None,
             model=model_param_partition_specs,
             learner=learner_state_partition_specs,
@@ -172,7 +179,8 @@ class SpmdTrainer(_SpmdRunner):
                     summaries=None,
                     loss=None,
                     aux=None,
-                )),
+                ),
+            ),
             donate_argnums=(0,),  # donate the state
         )
         for evaler_name in cfg.evalers:
@@ -180,16 +188,14 @@ class SpmdTrainer(_SpmdRunner):
 
     @property
     def step(self):
-        if self._state is None:
-            return 0
-        return self._state.step
+        return self._step
 
     def _step_log(self, msg, *args, **kwargs):
         logging.info(
             "%s process % 3d step % 8d] " + msg,
             self.path(),
             jax.process_index(),
-            self.step,
+            -1 if self.step is None else self.step,
             *args,
             **kwargs,
         )
@@ -203,41 +209,46 @@ class SpmdTrainer(_SpmdRunner):
         with maps.mesh(mesh.devices, mesh.axis_names):
             self._init(prng_key)
 
-            step = self.step.item()
-            if step >= cfg.max_step:
+            if self.step >= cfg.max_step:
                 self._step_log("Already reached max_step=%s. Stopping", cfg.max_step)
                 return None
 
             start_time = time.perf_counter()
-            perf_steps = 0
+            num_steps = 0
             output = None
             stop_trace_step = None
             for input_batch in self.input:
-                if step == stop_trace_step:
+                if self.step == stop_trace_step:
                     assert output is not None
                     jax.tree_map(lambda x: x.block_until_ready(), output)
                     jax.profiler.stop_trace()
                     self._step_log("Stopped profiler tracing")
                     stop_trace_step = None
-                if step in cfg.start_trace_steps:
-                    assert stop_trace_step is None
-                    self._step_log("Start profiler tracing")
-                    jax.profiler.start_trace(cfg.summary_writer.dir)
-                    stop_trace_step = step + 3
-                step += 1
-                output = self._run_step(step, input_batch)
-                perf_steps += 1
-                if perf_steps % 100 == 0:
+                if self.step in cfg.start_trace_steps:
+                    if stop_trace_step is not None:
+                        logging.warning(
+                            "Skipping trace at step %s, since it is too close to the previous one: %s",
+                            self.step,
+                            cfg.start_trace_steps,
+                        )
+                    else:
+                        self._step_log("Start profiler tracing")
+                        jax.profiler.start_trace(cfg.summary_writer.dir)
+                        stop_trace_step = self.step + 3
+                self._step = self._step + 1
+                self.vlog(3, "Start step %s", self.step)
+                output = self._run_step(input_batch)
+                self.vlog(3, "Done step %s", self.step)
+                num_steps += 1
+                if num_steps % 100 == 0:
                     now = time.perf_counter()
-                    self._step_log("Average step time: %s seconds", (now - start_time) / perf_steps)
-                    perf_steps = 0
+                    self._step_log("Average step time: %s seconds", (now - start_time) / num_steps)
+                    num_steps = 0
                     start_time = now
-                if step >= cfg.max_step:
+                if self.step >= cfg.max_step:
                     self._step_log("Reached max_step=%s. Stopping", cfg.max_step)
-                    assert self.step == step, f"Step mismatch: {self.step} vs. {step}"
                     return output
             self._step_log("Reached end of inputs. Stopping")
-            assert self.step == step, f"Step mismatch: {self.step} vs. {step}"
             return output
 
     def _init(self, prng_key: jax.random.KeyArray):
@@ -248,7 +259,6 @@ class SpmdTrainer(_SpmdRunner):
             )
             learner_params = self.learner.init(model_params)
             return _TrainerState(
-                step=jnp.zeros([], dtype=jnp.int64),
                 prng_key=prng_key,
                 model=model_params,
                 learner=learner_params,
@@ -260,6 +270,7 @@ class SpmdTrainer(_SpmdRunner):
             out_axis_resources=self._trainer_state_partition_specs,
         )
         self._step_log("Initializing states")
+        self._step = None
         self._state = init_computation(prng_key)
         flat_paths, _ = jax.tree_flatten(tree_paths(self._state))
         flat_values, _ = jax.tree_flatten(self._state)
@@ -267,45 +278,49 @@ class SpmdTrainer(_SpmdRunner):
             self._step_log("State: %s=%s(%s)", path, value.dtype, value.shape)
 
         # Try to restore the latest checkpoint.
-        self._state = self.checkpointer.restore(step=None, state=self._state)
+        self._step, self._state = self.checkpointer.restore(step=None, state=self._state)
+        if self.step is None:
+            self._step = 0
+            # TODO(ruoming): enable saving of the initial state for debugging.
+            # logging.info("Checkpoint not found. Save the initial checkpoint.")
+            # self.checkpointer.save(step=self.step, state=self._state)
 
-    def _run_step(self, step: int, input_batch: NestedTensor) -> NestedTensor:
+    def _run_step(self, input_batch: NestedTensor) -> NestedTensor:
         """Runs a single training step.
 
         Args:
-            step: The current step (starting from 1).
             input_batch: a NestedTensor.
 
         Returns:
             A dict containing 'loss' and 'aux' outputs.
         """
-        with jax.profiler.StepTraceAnnotation("train", step_num=step):
+        with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
             self._state, outputs = self._jit_train_step(self._state, input_batch)
 
-        if step % 100 == 0:
+        if self.step % 100 == 0:
             self._step_log(
                 "loss=%s aux=%s",
                 outputs["loss"],
                 jax.tree_map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
             )
 
-        self.summary_writer(step, {"loss": outputs["loss"], **outputs["summaries"]})
+        self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
         # Note: we will use the same eval key as the training keys of the future step, which should be okay.
         prng_key = self._state.prng_key
         for evaler in self._evalers:
             prng_key = evaler.eval_step(
-                step,
+                self.step,
                 prng_key=prng_key,
                 model_params=self._state.model,
             )
-        self.checkpointer.save(step=step, state=self._state)
+        self.checkpointer.save(step=self.step, state=self._state)
         return {"loss": outputs["loss"], "aux": outputs["aux"]}
 
     def _train_step(
-            self,
-            state: _TrainerState,
-            input_batch: Dict[str, Any],
+        self,
+        state: _TrainerState,
+        input_batch: Dict[str, Any],
     ) -> Tuple[_TrainerState, NestedTensor]:
         new_prng_key, forward_key, learner_key = jax.random.split(state.prng_key, 3)
 
@@ -330,10 +345,9 @@ class SpmdTrainer(_SpmdRunner):
             state=state.learner,
             is_training=True,
             prng_key=learner_key,
-            inputs=dict(step=state.step, model_params=state.model, gradients=grads),
+            inputs=dict(model_params=state.model, gradients=grads),
         )
         updated_state = _TrainerState(
-            step=state.step + 1,
             prng_key=new_prng_key,
             model=_apply_updates(updated_model_params, forward_output_collection.state_updates),
             learner=learner.LearnerState(**learner_output_collection.state_updates),
@@ -378,11 +392,11 @@ class SpmdEvaler(_SpmdRunner):
         )
 
     def eval_step(
-            self,
-            step: int,
-            *,
-            prng_key: jax.random.KeyArray,
-            model_params: NestedTensor,
+        self,
+        step: int,
+        *,
+        prng_key: jax.random.KeyArray,
+        model_params: NestedTensor,
     ) -> jax.random.KeyArray:
         cfg = self.config
         if step % cfg.run_every_n_steps != 0:

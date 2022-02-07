@@ -26,24 +26,24 @@ class CheckpointerTest(absltest.TestCase):
         state1 = dict(x=jnp.ones([], dtype=jnp.int32), y=jnp.ones([2], dtype=jnp.float32) + 1)
 
         # Restoring from an empty dir returns the input state if step=None.
-        self.assertNestedEqual(state0, ckpt.restore(step=None, state=state0))
-        self.assertNestedEqual(state1, ckpt.restore(step=None, state=state1))
+        self.assertNestedEqual((None, state0), ckpt.restore(step=None, state=state0))
+        self.assertNestedEqual((None, state1), ckpt.restore(step=None, state=state1))
         # With an explicit step, ValueError will be raised.
         with self.assertRaises(ValueError):
             ckpt.restore(step=0, state=state0)
 
         ckpt.save(step=0, state=state0)
-        self.assertNestedEqual(state0, ckpt.restore(step=0, state=state1))
+        self.assertNestedEqual((0, state0), ckpt.restore(step=0, state=state1))
         # step=None restores from the latest ckpt.
-        self.assertNestedEqual(state0, ckpt.restore(step=None, state=state1))
+        self.assertNestedEqual((0, state0), ckpt.restore(step=None, state=state1))
 
         ckpt.save(step=1, state=state1)
-        self.assertNestedEqual(state1, ckpt.restore(step=1, state=state0))
+        self.assertNestedEqual((1, state1), ckpt.restore(step=1, state=state0))
         # step=None restores from the latest ckpt.
-        self.assertNestedEqual(state1, ckpt.restore(step=None, state=state0))
+        self.assertNestedEqual((1, state1), ckpt.restore(step=None, state=state0))
 
         # With state=None, we don't perform checks on the structure, dtypes, and shapes.
-        self.assertNestedEqual(state1, ckpt.restore())
+        self.assertNestedEqual((1, state1), ckpt.restore())
 
         # When the given state has a different dict key: 'z' instead of 'y'.
         with self.assertRaisesRegex(KeyError, "z"):

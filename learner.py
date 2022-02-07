@@ -112,9 +112,7 @@ class Learner(Module):
     def init(self, model_params: NestedTensor) -> LearnerState:
         return LearnerState(optimizer=self.optimizer.init(model_params))
 
-    def update(
-        self, *, step: Tensor, gradients: NestedTensor, model_params: NestedTensor
-    ) -> NestedTensor:
+    def update(self, *, gradients: NestedTensor, model_params: NestedTensor) -> NestedTensor:
         """Computes `model_params` updates with `gradients`."""
         parameter_updates, optimizer_state = self.optimizer.update(
             gradients, state=self.state.optimizer, params=model_params

@@ -139,8 +139,8 @@ class TrainerTest(parameterized.TestCase):
             .set(name="ckpt", dir=trainer.checkpointer.config.dir)
             .instantiate(parent=None)
         )
-        restored_state = ckpt.restore(step=None, state=trainer._state)
-        self.assertEqual(10, restored_state.step)
+        restored_step, restored_state = ckpt.restore(step=None, state=trainer._state)
+        self.assertEqual(10, restored_step)
         trainer: SpmdTrainer = cfg.instantiate(parent=None)
         # Since we will be resuming from the checkpoint at step 10, a different prng_key doesn't matter.
         output_b = trainer.run(prng_key=jax.random.PRNGKey(456))

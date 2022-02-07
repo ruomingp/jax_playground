@@ -1,7 +1,8 @@
 from absl import logging
 from absl.testing import absltest, parameterized
-from input_image import ImagenetInput
+
 import utils
+from input_image import ImagenetInput
 
 
 def _count_batches(dataset, max_batches=100):
@@ -14,7 +15,6 @@ def _count_batches(dataset, max_batches=100):
 
 
 class ImagenetInputTest(parameterized.TestCase):
-
     @parameterized.parameters(False, True)
     def testIteration(self, is_training):
         cfg = ImagenetInput.default_config().set(
@@ -33,9 +33,7 @@ class ImagenetInputTest(parameterized.TestCase):
             # For training, we loop over the dataset only once.
             self.assertEqual(40 // 8, _count_batches(dataset, max_batches=100))
         for batch in dataset:
-            self.assertEqual(
-                {"image": (8, 224, 224, 3), "label": (8,)}, utils.shapes(batch)
-            )
+            self.assertEqual({"image": (8, 224, 224, 3), "label": (8,)}, utils.shapes(batch))
             break
 
     def testIndivisible(self):
@@ -47,9 +45,7 @@ class ImagenetInputTest(parameterized.TestCase):
             is_training=False,
             data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
         )
-        with self.assertRaisesRegex(
-            ValueError, "must be divisible by global_batch_size"
-        ):
+        with self.assertRaisesRegex(ValueError, "must be divisible by global_batch_size"):
             cfg.instantiate(parent=None)
 
 

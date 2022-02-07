@@ -82,7 +82,7 @@ class LearnerTest(parameterized.TestCase):
         )(
             prng_key=jax.random.PRNGKey(123),
             state=state,
-            inputs=dict(step=step, gradients=grads, model_params=params),
+            inputs=dict(gradients=grads, model_params=params),
         )
         np.testing.assert_allclose(
             updated_params,

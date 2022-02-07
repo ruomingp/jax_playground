@@ -1,9 +1,9 @@
 """A launcher to train ResNet-18 on ImageNet.
 
 On the TPU VM:
-    gs_bucket=permanent-us-central1-q5loch; \
-    dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F).e; \
-    data_dir=gs://${gs_bucket}/tensorflow_datasets; \
+    gs_bucket=permanent-us-central1-q5loch
+    dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)
+    data_dir=gs://${gs_bucket}/tensorflow_datasets
     python3 imagenet.py --trainer_dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
 
 Or for debugging:
@@ -29,7 +29,7 @@ import launch
 import learner
 import resnet
 import schedule
-from input_image import ImagenetInput, FakeImagenetInput
+from input_image import FakeImagenetInput, ImagenetInput
 from trainer import SpmdEvaler, SpmdTrainer
 
 flags.DEFINE_string(
@@ -46,6 +46,7 @@ flags.DEFINE_integer(
     "If not None, the maximum number of eval examples. "
     "If there are more examples in an eval dataset, use only the first N examples.",
 )
+flags.DEFINE_integer("resnet_hidden_dim", 64, "The resnet hidden_dim.")
 
 FLAGS = flags.FLAGS
 
@@ -71,7 +72,7 @@ def imagenet_trainer_config() -> config_lib.InstantiableConfig:
     cfg.name = "imagenet_trainer"
 
     # Model and optimization.
-    cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=128, num_blocks_per_stage=[4, 4, 4, 4, 4])
+    cfg.model = resnet.ResNetModel.resnet18_config().set(hidden_dim=FLAGS.resnet_hidden_dim)
     learning_rate = config_lib.config_for_function(schedule.stepwise).set(
         sub=[0.1, 0.01, 0.001],
         start_step=[steps_per_epoch * 30, steps_per_epoch * 60],

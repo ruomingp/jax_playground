@@ -5,7 +5,7 @@ parameters.
 """
 
 import difflib
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import jax
 from flax.training import checkpoints as flax_checkpoints
@@ -40,14 +40,14 @@ class Checkpointer(Module):
         flax_checkpoints.save_checkpoint(
             ckpt_dir=self.ckpt_dir,
             step=step,
-            target=self._checkpoint_target(state),
+            target=self._checkpoint_target(step, state),
             keep=cfg.keep_last_n,
             keep_every_n_steps=cfg.keep_every_n_steps,
         )
 
     def restore(
         self, *, step: Optional[int] = None, state: Optional[NestedTensor] = None
-    ) -> NestedTensor:
+    ) -> Tuple[int, NestedTensor]:
         """Restores from the checkpoint directory.
 
         Args:
@@ -57,7 +57,7 @@ class Checkpointer(Module):
         Returns:
             The restored checkpoint state. If step is None and no checkpoint is found, returns the input `state`.
         """
-        input_target = self._checkpoint_target(state)
+        input_target = self._checkpoint_target(step, state)
         restored_target = flax_checkpoints.restore_checkpoint(
             ckpt_dir=self.ckpt_dir, target=input_target, step=step
         )
@@ -69,12 +69,13 @@ class Checkpointer(Module):
                     "checkpoint tree dtypes or shapes and the current one has been detected:\n"
                     f"{diff}"
                 )
-        return restored_target["state"]
+        return restored_target["step"], restored_target["state"]
 
-    def _checkpoint_target(self, state: NestedTensor):
+    def _checkpoint_target(self, step: int, state: NestedTensor):
         if state is None:
             return None
         return {
+            "step": step,
             "state": state,
             "dtypes_shapes": self._dtypes_shapes(state),
         }
