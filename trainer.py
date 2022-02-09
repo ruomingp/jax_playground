@@ -137,8 +137,8 @@ class SpmdTrainer(_SpmdRunner):
         super().__init__(cfg, parent=parent)
         cfg = self.config
 
-        self._step = None
-        self._state = None
+        self._step: int = None
+        self._state: _TrainerState = None
 
         self._add_child("model", cfg.model)
         self._add_child("learner", cfg.learner)

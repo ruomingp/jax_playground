@@ -1,9 +1,11 @@
 """Optimization modules."""
 import copy
-from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple, Optional
 
+import jax
 import optax
 from absl import logging
+from jax import numpy as jnp
 
 import config as config_lib
 import schedule
@@ -19,13 +21,24 @@ class PartitionedGradientTransformation(NamedTuple):
     partition: TransformPartitionSpecFn
 
 
-def chain(*elements):
-    base = optax.chain(
-        *[optax.GradientTransformation(init=e.init, update=e.update) for e in elements]
-    )
+def chain(*args):
+    def to_partitioned_transformation(transformation):
+        if isinstance(transformation, (config_lib.InstantiableConfig, config_lib.FunctionConfig)):
+            transformation = transformation.instantiate()
+        if isinstance(transformation, optax.GradientTransformation):
+            transformation = replicate(transformation)
+        if not isinstance(transformation, PartitionedGradientTransformation):
+            raise ValueError(
+                f"Expected PartitionedGradientTransformation. Got {type(transformation)}: {transformation}"
+            )
+        return transformation
+
+    args = [to_partitioned_transformation(e) for e in args]
+
+    base = optax.chain(*[optax.GradientTransformation(init=e.init, update=e.update) for e in args])
 
     def partition(input_partition_spec):
-        return tuple(e.partition(input_partition_spec) for e in elements)
+        return tuple(e.partition(input_partition_spec) for e in args)
 
     return PartitionedGradientTransformation(
         init=base.init, update=base.update, partition=partition
@@ -81,6 +94,33 @@ def sgd_optimizer(
         trace_partition(optax.trace(decay=momentum)),
         replicate(optax.add_decayed_weights(weight_decay)),
         replicate(optax.scale_by_schedule(scale_from_learning_rate(learning_rate))),
+    )
+
+
+def clip_by_global_norm(
+    max_norm: Optional[float] = None, *, eps: float = 1e-8
+) -> PartitionedGradientTransformation:
+    """Clips gradeints s.t. global norm <= max_norm."""
+
+    def init_fn(params):
+        del params
+        return optax.EmptyState()
+
+    def update_fn(updates, state, params=None):
+        del params
+        g_norm = optax.global_norm(updates)
+        context = current_context()
+        if context is not None:
+            context.add_summary("gradient_norm", g_norm)
+        if max_norm is not None:
+            g_scale = jnp.minimum(1.0, max_norm / (g_norm + eps))
+            if context is not None:
+                context.add_summary("gradient_scale", g_scale)
+            updates = jax.tree_map(lambda t: t * g_scale, updates)
+        return updates, state
+
+    return PartitionedGradientTransformation(
+        init=init_fn, update=update_fn, partition=lambda partition_spec: None
     )
 
 

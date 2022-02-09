@@ -9,8 +9,8 @@ from jax import numpy as jnp
 import schedule
 import utils
 from config import config_for_function
-from learner import Learner, LearnerState, sgd_optimizer
-from module import OutputCollection, PartitionSpec
+from learner import Learner, LearnerState, chain, clip_by_global_norm, sgd_optimizer
+from module import PartitionSpec
 from module import functional as F
 
 
@@ -45,6 +45,26 @@ class LearnerTest(parameterized.TestCase):
         updated_params = optax.apply_updates(params, updates)
         np.testing.assert_allclose(updated_params, params + updates, atol=1e-6)
 
+    @parameterized.parameters(None, 100.0, 0.1)
+    def testGradientClipping(self, max_norm):
+        clip = clip_by_global_norm(max_norm=max_norm)
+        params = jnp.asarray([0, 1, 2, -3], dtype=jnp.float32)
+        state = clip.init(params)
+
+        def loss(x):
+            return -jax.nn.log_softmax(x)[1]
+
+        loss, grads = jax.value_and_grad(loss)(params)
+        np.testing.assert_allclose(loss, 1.412078, atol=1e-6)
+        np.testing.assert_allclose(grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6)
+        g_norm = optax.global_norm(grads)
+
+        updates, updated_state = clip.update(grads, state=state, params=params)
+        if max_norm is None or g_norm < max_norm:
+            np.testing.assert_allclose(updates, grads, atol=1e-6)
+        else:
+            np.testing.assert_allclose(max_norm, optax.global_norm(updates))
+
     def testLearner(self):
         learning_rate = config_for_function(schedule.stepwise).set(
             sub=[0.1, 0.01, 0.001],
@@ -53,8 +73,11 @@ class LearnerTest(parameterized.TestCase):
         learning_rate_fn = schedule.as_schedule_fn(learning_rate)
         weight_decay = 1e-4
         step = 0
-        optimizer_cfg = config_for_function(sgd_optimizer).set(
+        sgd_cfg = config_for_function(sgd_optimizer).set(
             learning_rate=learning_rate, weight_decay=weight_decay
+        )
+        optimizer_cfg = config_for_function(chain).set(
+            args=(config_for_function(clip_by_global_norm), sgd_cfg),
         )
         learner: Learner = (
             Learner.default_config()
@@ -90,16 +113,26 @@ class LearnerTest(parameterized.TestCase):
             atol=1e-6,
         )
         summaries = output_collection.summaries
-        self.assertEqual(
-            {"learning_rate": learning_rate_fn(step), "lr_schedule_step": 0}, summaries
+        self.assertAlmostEqual(
+            {
+                "learning_rate": learning_rate_fn(step),
+                "lr_schedule_step": 0,
+                "gradient_norm": 1.0093285,
+            },
+            summaries,
         )
         state_updates = output_collection.state_updates
         self.assertNestedEqual(
             {
                 "optimizer": (
-                    optax.TraceState(trace=grads),
+                    # clip_by_global_norm.
                     optax.EmptyState(),
-                    optax.ScaleByScheduleState(count=1),
+                    # sgd.
+                    (
+                        optax.TraceState(trace=grads),
+                        optax.EmptyState(),
+                        optax.ScaleByScheduleState(count=1),
+                    ),
                 )
             },
             state_updates,
@@ -108,11 +141,16 @@ class LearnerTest(parameterized.TestCase):
         self.assertEqual(
             LearnerState(
                 optimizer=(
-                    PartitionSpec(
-                        ("model",),
+                    # clip_by_global_norm.
+                    None,
+                    # sgd.
+                    (
+                        PartitionSpec(
+                            ("model",),
+                        ),
+                        None,
+                        None,
                     ),
-                    None,
-                    None,
                 )
             ),
             learner.create_state_partition_specs(PartitionSpec("model")),

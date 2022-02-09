@@ -55,7 +55,9 @@ class Checkpointer(Module):
             state: if not None, ensures that the restored state have the same structure, dtypes, and shapes as `state`.
 
         Returns:
-            The restored checkpoint state. If step is None and no checkpoint is found, returns the input `state`.
+            (restored_step, restored_checkpoint_state).
+            If step is None and no checkpoint is found, returns None as restored_step and the input `state` as
+            restored_checkpoint_state.
         """
         input_target = self._checkpoint_target(step, state)
         restored_target = flax_checkpoints.restore_checkpoint(

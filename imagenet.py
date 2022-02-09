@@ -1,10 +1,10 @@
 """A launcher to train ResNet-18 on ImageNet.
 
 On the TPU VM:
-    gs_bucket=permanent-us-central1-q5loch
-    dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F)
-    data_dir=gs://${gs_bucket}/tensorflow_datasets
-    python3 imagenet.py --trainer_dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
+    gs_bucket=permanent-us-central1-q5loch; \
+    dir=gs://${gs_bucket}/${USER}/experiments/imagenet-$(date +%F); \
+    data_dir=gs://${gs_bucket}/tensorflow_datasets; \
+    python3 imagenet.py --resnet_hidden_dim=512 --trainer_dir=$dir --data_dir=$data_dir 2>&1 | tee log-$(date +%F-%T)
 
 Or for debugging:
     python3 imagenet.py \

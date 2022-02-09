@@ -217,6 +217,13 @@ class ConfigTest(absltest.TestCase):
         cfg = config.config_for_function(tfds.load)
         self.assertContainsSubset({"fn", "name", "split", "download"}, cfg.keys())
 
+        def fn_with_args(*args):
+            return list(args)
+
+        cfg = config.config_for_function(fn_with_args)
+        cfg.args = [1, 2, 3]
+        self.assertEqual([1, 2, 3], cfg.instantiate())
+
 
 if __name__ == "__main__":
     absltest.main()

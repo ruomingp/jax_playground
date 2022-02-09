@@ -349,7 +349,9 @@ class InstantiableConfig(Config):
             return self.cls(self, **kwargs)
         else:
             # Initialize by passing config fields as kwargs.
-            return self.cls(**{k: v for k, v in self.items() if k != "cls"}, **kwargs)
+            config_args = getattr(self, "args", [])
+            config_kwargs = {k: v for k, v in self.items() if k != "cls" and k != "args"}
+            return self.cls(*config_args, **config_kwargs, **kwargs)
 
 
 class Configurable:
@@ -385,7 +387,9 @@ class FunctionConfig(Config):
         self.define("fn", fn, "The function that this Config object configures.")
 
     def instantiate(self, **kwargs) -> Any:
-        return self.fn(**{k: v for k, v in self.items() if k != "fn"}, **kwargs)
+        config_args = getattr(self, "args", [])
+        config_kwargs = {k: v for k, v in self.items() if k != "fn" and k != "args"}
+        return self.fn(*config_args, **config_kwargs, **kwargs)
 
 
 def config_for_function(fn):
