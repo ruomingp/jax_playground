@@ -15,7 +15,7 @@ def _process_example(example):
 def main(argv):
     batch_size = 128
     builder = tfds.builder(
-        "c4",
+        "c4/en",
         # data_dir="gs://permanent-us-central1-q5loch/tensorflow_datasets",
         data_dir="gs://permanent-us-east1-q5loch/tensorflow_datasets"
     )
