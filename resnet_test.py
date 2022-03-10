@@ -74,10 +74,9 @@ class ResNetTest(absltest.TestCase):
         model: resnet.ResNetModel = (
             ResNetModel.resnet18_config().set(name="test").instantiate(parent=None)
         )
-        param_specs = model.create_parameter_specs_recursively()
+        init_params = model.initialize_parameters_recursively(jax.random.PRNGKey(1))
         param_spec_strs = [
-            f"{name}={list(param_spec.shape)}"
-            for name, param_spec in utils.flatten_items(param_specs)
+            f"{name}={list(param.shape)}" for name, param in utils.flatten_items(init_params)
         ]
 
         ref = resnet18(pretrained=True)

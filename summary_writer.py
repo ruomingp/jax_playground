@@ -1,8 +1,8 @@
+import contextlib
 import numbers
 from typing import Any, Dict, Optional
 
 import jax
-from absl import logging
 from jax import numpy as jnp
 from tensorflow import summary as tf_summary
 
@@ -31,6 +31,11 @@ class SummaryWriter(Module):
             else tf_summary.create_noop_writer()
         )
 
+    @contextlib.contextmanager
+    def as_default(self):
+        with self.summary_writer.as_default() as writer:
+            yield writer
+
     def __call__(self, step: int, values: Dict[str, Any]):
         cfg = self.config
         if step % cfg.write_every_n_steps != 0:
@@ -43,7 +48,7 @@ class SummaryWriter(Module):
             )
 
             def write(path: str, value: jnp.ndarray):
-                logging.info("SummaryWriter %s: %s=%s", self.path(), path, value)
+                self.vlog(3, "SummaryWriter %s: %s=%s", self.path(), path, value)
                 if isinstance(value, WeightedScalar):
                     tf_summary.scalar(path, value.mean, step=step)
                 elif isinstance(value, numbers.Number) or value.ndim == 0:

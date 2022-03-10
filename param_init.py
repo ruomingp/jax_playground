@@ -1,9 +1,8 @@
 """Modules for configurable parameter initialization."""
 
-import math
-from typing import Any, Sequence, Tuple
+from typing import Any, NamedTuple, Sequence, Tuple, Union
 
-import jax.random
+import jax
 from jax import numpy as jnp
 
 import config as config_lib
@@ -53,19 +52,52 @@ class GaussianInitializer(Initializer):
         return jax.random.normal(prng_key, shape=shape, dtype=dtype) * self._std
 
 
+def truncated_normal(stddev: float = 1e-2, dtype: jnp.dtype = jnp.float_):
+    """Truncated normal variant of jax.nn.initializers.
+
+    Args:
+        stddev: Standard deviation of gaussian to draw from.
+        dtype: Type to draw from.
+    Returns:
+        initializer fn.
+    """
+
+    def init(key, shape, dtype=dtype):
+        dtype = jax.dtypes.canonicalize_dtype(dtype)
+        # constant is stddev of standard normal truncated to (-2, 2)
+        stddev = stddev / jnp.array(0.87962566103423978, dtype)
+        return jax.random.truncated_normal(key, -2, 2, shape, dtype) * stddev
+
+    return init
+
+
+class FanAxes(NamedTuple):
+    # Input axis or sequence of axes of the fan "input" dimension.
+    in_axis: Union[Tuple[int], int]
+    # Output axis or sequence of axes of the fan "output" dimension.
+    out_axis: Union[Tuple[int], int]
+
+
 class DefaultInitializer(config_lib.Configurable, Initializer):
     """The default initializer."""
 
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
-        cfg.define("gain", 1.0, "The default gain for weight initialization.")
+        cfg.define("scale", 1.0, "The default scale for weight initialization.")
         cfg.define(
             "fan",
-            "xavier",
-            'How to compute the fan, supported values are "fan_in", "fan_out", and "xavier".',
+            "fan_avg",
+            (
+                'Type of fan to compute, supported values are "fan_in", "fan_out", "fan_avg" and None. '
+                + "If None then no fan scaling factor is computed."
+            ),
         )
-        cfg.define("distribution", "uniform", 'Weight distribution: "uniform" or "normal".')
+        cfg.define(
+            "distribution",
+            "uniform",
+            'Weight distribution: "uniform", "normal", or "truncated_normal".',
+        )
         return cfg
 
     def initialize(
@@ -94,38 +126,28 @@ class DefaultInitializer(config_lib.Configurable, Initializer):
         dtype: jnp.dtype,
     ) -> jnp.ndarray:
         cfg = self.config
-        fan = self._get_fan(name, shape)
-        std = cfg.gain / math.sqrt(fan)
-        if cfg.distribution == "uniform":
-            b = math.sqrt(3) * std
-            weight = jax.random.uniform(prng_key, shape=shape, dtype=dtype, minval=-b, maxval=b)
+        if cfg.fan is not None:
+            fan_axes = self._compute_fan_axes(name, shape)
+            initializer = jax.nn.initializers.variance_scaling(
+                cfg.scale,
+                mode=cfg.fan,
+                distribution=cfg.distribution,
+                dtype=dtype,
+                **fan_axes._asdict(),
+            )
+            return initializer(prng_key, shape=shape)
+        elif cfg.distribution == "uniform":
+            initializer = jax.nn.initializers.uniform(cfg.scale, dtype=dtype)
         elif cfg.distribution == "normal":
-            weight = jax.random.normal(prng_key, shape=shape, dtype=dtype) * std
+            initializer = jax.nn.initializers.normal(cfg.scale, dtype=dtype)
+        elif cfg.distribution == "truncated_normal":
+            initializer = truncated_normal(cfg.scale, dtype=dtype)
         else:
-            raise NotImplementedError(f"Unsupported distribution ({cfg.distribution})")
-        return weight
+            raise NotImplementedError(
+                f"Unsupported fan {cfg.fan} and distribution {cfg.distribution}."
+            )
+        return initializer(prng_key, shape=shape)
 
-    def _get_fan(self, name: str, shape: Shape):
-        cfg = self.config
-        fan_in, fan_out = self._calculate_fan_in_and_fan_out(name, shape)
-        if cfg.fan == "fan_in":
-            return fan_in
-        elif cfg.fan == "fan_out":
-            return fan_out
-        elif cfg.fan == "xavier":
-            return (fan_in + fan_out) / 2
-        else:
-            raise NotImplementedError(f"Unsupported fan ({cfg.fan})")
-
-    def _calculate_fan_in_and_fan_out(self, name: str, shape: Shape) -> Tuple[int, int]:
-        if len(shape) < 2:
-            raise NotImplementedError(f"Unsupported weight shape {shape} for {name}")
-        output_dim = shape[-1]
-        input_dim = shape[-2]
-        receptive_field_size = 1
-        if len(shape) > 2:
-            for s in shape[:-2]:
-                receptive_field_size *= s
-        fan_in = input_dim * receptive_field_size
-        fan_out = output_dim * receptive_field_size
-        return fan_in, fan_out
+    def _compute_fan_axes(self, name: str, shape: Shape) -> FanAxes:
+        # Override for custom fan behavior.
+        return FanAxes(in_axis=-2, out_axis=-1)

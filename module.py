@@ -26,9 +26,6 @@ import param_init
 from metrics import WeightedScalar
 from utils import NestedTensor, Tensor
 
-# NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, "NestedPartitionSpec"]]]
-NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, Any]]]
-
 
 class OutputCollection(NamedTuple):
     summaries: NestedTensor
@@ -71,7 +68,10 @@ class InvocationContext:
         assert kwargs["module"] is self.module
         return InvocationContext(**kwargs)
 
-    def add_child(self, name: str, *, state=None) -> "InvocationContext":
+    def add_child(
+        self, name: str, *, state=None, output_collection_name=None
+    ) -> "InvocationContext":
+        output_collection_name = output_collection_name or name
         self.prng_key, child_key = jax.random.split(self.prng_key)
         state = state or self.state.get(name)
         return InvocationContext(
@@ -79,7 +79,7 @@ class InvocationContext:
             is_training=self.is_training,
             prng_key=child_key,
             state=state,
-            output_collection=self.output_collection.add_child(name),
+            output_collection=self.output_collection.add_child(output_collection_name),
         )
 
     def add_summary(self, name: str, value: Union[WeightedScalar, Tensor]):
@@ -137,10 +137,12 @@ class Module(config_lib.Configurable):
 
     def __init__(self, cfg: config_lib.Config, *, parent: Optional["Module"]):
         super().__init__(cfg)
+        cfg = self.config
         if not cfg.name:
             raise ValueError(f"Module must have a name: {cfg.debug_string()}")
         self._parent = parent  # avoid adding parent to self._modules
         self._children: Dict[str, "Module"] = {}
+        self._vlog_level = cfg.vlog
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
@@ -170,7 +172,7 @@ class Module(config_lib.Configurable):
         return f"{type(self)}@{self.path()}"
 
     def vlog(self, level, msg, *args, **kwargs):
-        if level <= self.config.vlog:
+        if level <= self._vlog_level:
             logging.info(msg, *args, **kwargs)
 
     def _add_child(self, name: str, child_config: config_lib.Config, **kwargs) -> "Module":
@@ -298,23 +300,54 @@ def functional(
 
 
 @dataclasses.dataclass
+class FactorizationSpec:
+    """A FactorizationSpec describes how to factorize a parameter's gradient. Used for Adafactor."""
+
+    # A list of None/str corresponding to the axes of the parameter shape. Each element is either:
+    # None:  no factorization along this axis.
+    # str: the factorization axis name.
+    #
+    # For adafactor, either all axises are None or exactly two of the axes are "row" and "col", respectively.
+    axes: Sequence[Optional[str]]
+
+
+# NestedFactorizationSpec = Dict[str, Union[FactorizationSpec, "NestedFactorizationSpec"]]
+NestedFactorizationSpec = Dict[str, Union[FactorizationSpec, Any]]
+
+
+@dataclasses.dataclass
+class ParameterPartitionSpec:
+    """A wrapper around PartitionSpec with auxiliary information such as factorization spec."""
+
+    shape: Sequence[int]
+    partition: PartitionSpec
+    factorization: Optional[FactorizationSpec] = None
+
+
+# When pytype supports recursive types, switch to:
+# NestedParameterPartitionSpec = Optional[Union[ParameterPartitionSpec, Dict[str, "NestedParameterPartitionSpec"]]]
+NestedParameterPartitionSpec = Optional[Union[ParameterPartitionSpec, Dict[str, Any]]]
+
+# NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, "NestedPartitionSpec"]]]
+NestedPartitionSpec = Optional[Union[PartitionSpec, Dict[str, Any]]]
+
+
+# ParameterSpec is a dataclass so that jax.tree_map does not expand it.
+@dataclasses.dataclass
 class ParameterSpec:
     shape: Sequence[int]
     # If None, the parameter will not be partitioned and will be replicated.
-    # If a sequence, it should have at most len(shape) elements. partition_spec[i] describes partitioning for shape[i],
+    # If a sequence, it should have at most len(shape) elements. partition[i] describes partitioning for shape[i],
     # where each value can be:
     # - None: do not partition along this axis, or
     # - 'model': partition along this axis across the 'model' dim of the device mesh.
-    partition_spec: Optional[Sequence[Optional[str]]]
+    partition: Optional[Sequence[Optional[str]]]
     # The data type of the param. If None, uses the layer's default dtype.
     dtype: Optional[jnp.dtype] = None
     # The initializer of the param. If None, uses the layer's default initializer.
     initializer: Optional[param_init.Initializer] = None
-
-
-# When pytype supports recursive typing:
-# NestedParameterSpec = Dict[str, Union[ParameterSpec, "NestedParameterSpec"]]
-NestedParameterSpec = Dict[str, Union[ParameterSpec, Any]]
+    # Factorization spec for the parameter.
+    factorization: Optional[FactorizationSpec] = None
 
 
 class BaseLayer(Module):
@@ -367,40 +400,38 @@ class BaseLayer(Module):
             return init
         return self.parent.param_init()
 
-    def create_parameter_specs_recursively(self) -> NestedParameterSpec:
-        specs = self._create_layer_parameter_specs()
-        for name, spec in specs.items():
-            if spec.dtype is None:
-                spec.dtype = self.dtype()
-            if spec.initializer is None:
-                spec.initializer = self.param_init()
-        for name, child in self._children.items():
-            assert name not in specs
-            specs[name] = child.create_parameter_specs_recursively()
-        return specs
-
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         """Subclasses can override this method to add layer parameters."""
         return {}
 
-    def initialize_parameters_recursively(
-        self,
-        prng_key: jax.random.KeyArray,
-        param_specs: Optional[NestedParameterSpec] = None,
-    ) -> NestedTensor:
-        if param_specs is None:
-            param_specs = self.create_parameter_specs_recursively()
+    def create_partition_specs_recursively(self) -> NestedParameterPartitionSpec:
+        specs: NestedParameterPartitionSpec = {}
+        param_specs = self._create_layer_parameter_specs()
+        for name, param_spec in param_specs.items():
+            specs[name] = ParameterPartitionSpec(
+                shape=param_spec.shape,
+                partition=PartitionSpec(*param_spec.partition),
+                factorization=param_spec.factorization,
+            )
+        for name, child in self._children.items():
+            assert name not in specs
+            specs[name] = child.create_partition_specs_recursively()
+        return specs
+
+    def initialize_parameters_recursively(self, prng_key: jax.random.KeyArray) -> NestedTensor:
         params = {}
-        for name, child in param_specs.items():
+        param_specs = self._create_layer_parameter_specs()
+        for name, spec in param_specs.items():
+            if spec.dtype is None:
+                spec.dtype = self.dtype()
+            if spec.initializer is None:
+                spec.initializer = self.param_init()
             prng_key, child_key = jax.random.split(prng_key)
-            if isinstance(child, ParameterSpec):
-                params[name] = self._initialize_parameter(
-                    name, prng_key=child_key, parameter_spec=child
-                )
-            else:
-                params[name] = self.initialize_parameters_recursively(
-                    prng_key=child_key, param_specs=child
-                )
+            params[name] = self._initialize_parameter(name, prng_key=child_key, parameter_spec=spec)
+        for name, child in self._children.items():
+            assert name not in params
+            prng_key, child_key = jax.random.split(prng_key)
+            params[name] = self.children[name].initialize_parameters_recursively(prng_key=child_key)
         return params
 
     def _initialize_parameter(
@@ -418,12 +449,13 @@ class BaseLayer(Module):
         """
         if name in self._children:
             raise ValueError(f"Child {name} already exists.")
-        return parameter_spec.initializer.initialize(
+        param = parameter_spec.initializer.initialize(
             name,
             prng_key=prng_key,
             shape=parameter_spec.shape,
             dtype=parameter_spec.dtype,
         )
+        return param
 
     @property
     def parameters(self):

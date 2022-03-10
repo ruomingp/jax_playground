@@ -10,7 +10,6 @@ from module import (
     BaseLayer,
     InvocationContext,
     Module,
-    NestedParameterSpec,
     OutputCollection,
     ParameterSpec,
     current_context,
@@ -83,11 +82,11 @@ class InvocationContextTest(absltest.TestCase):
 
 
 class TestLayer(BaseLayer):
-    def create_parameter_specs_recursively(self) -> NestedParameterSpec:
+    def _create_layer_parameter_specs(self):
         return {
             "moving_mean": ParameterSpec(
                 shape=[],
-                partition_spec=None,
+                partition=None,
                 dtype=jnp.float32,
                 initializer=param_init.ConstantInitializer(value=1.0),
             )

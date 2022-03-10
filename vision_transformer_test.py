@@ -4,6 +4,7 @@ from absl.testing import absltest
 from transformers.models.vit import configuration_vit as hf_vit_config
 from transformers.models.vit import modeling_vit as hf_vit
 
+import layers
 from test_utils import TestCase, as_jax_tensor, as_torch_tensor, assert_allclose
 from vision_transformer import Model
 
@@ -16,17 +17,13 @@ class ModelTest(TestCase):
         cfg = Model.default_config().set(name="test")
         cfg.convert_to_sequence.set(patch_size=(16, 16))
         cfg.encoder_1d.pos_emb.shape = [14 * 14 + 1]  # 14 = 224 / 16. +1 for cls_token.
-        cfg.encoder_1d.set(
-            input_dim=model_dim, num_layers=num_layers, global_feature_extraction="cls_token"
-        )
-        transformer_cfg = cfg.encoder_1d.transformer
+        cfg.encoder_1d.set(input_dim=model_dim, global_feature_extraction="cls_token")
+        cfg.encoder_1d.transformer.num_layers = num_layers
+        transformer_cfg = cfg.encoder_1d.transformer.layer
         transformer_cfg.self_attention.attention.num_heads = num_heads
         transformer_cfg.feed_forward.hidden_dim = ff_dim
         # Disable dropout for deterministic behavior.
-        cfg.encoder_1d.input_dropout.rate = 0.0
-        transformer_cfg.feed_forward.dropout.rate = 0.0
-        transformer_cfg.self_attention.dropout.rate = 0.0
-        transformer_cfg.self_attention.attention.dropout.rate = 0.0
+        layers.set_dropout_rate_recursively(cfg, dropout_rate=0.0)
         logging.info("Test config:\n%s", cfg.debug_string())
         model: Model = cfg.instantiate(parent=None)
 

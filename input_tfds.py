@@ -15,7 +15,12 @@ import utils
 from module import Module
 
 
-class TfdsInput(Module):
+class BaseTfdsInput(Module):
+    """The base tfds-based input.
+
+    It defines the dataset config fields, but leaves _build_dataset() implementation to the subclass.
+    """
+
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
@@ -28,6 +33,37 @@ class TfdsInput(Module):
             None,
             "Used for tfds.load. If None, use $HOME/tensorflow_datasets.",
         )
+        return cfg
+
+    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
+        super().__init__(cfg, parent=parent)
+        cfg = self.config
+        if cfg.is_training is None:
+            raise ValueError(f"{self.path()}: is_training must be specified explicitly")
+        self._dataset = self._build_dataset()
+
+    def __iter__(self):
+        for example in self._dataset:
+            yield utils.as_tensor(example)
+
+    def _build_dataset(self) -> tf.data.Dataset:
+        raise NotImplementedError(type(self))
+
+    def _per_process_batch_size(self):
+        """The per-process batch size."""
+        cfg = self.config
+        if cfg.global_batch_size % jax.process_count() != 0:
+            raise ValueError(
+                f"global_batch_size ({cfg.global_batch_size} must be divisible by "
+                f"process_count ({jax.process_count()})"
+            )
+        return cfg.global_batch_size // jax.process_count()
+
+
+class TfdsInput(BaseTfdsInput):
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
         cfg.define(
             "download",
             False,
@@ -57,11 +93,8 @@ class TfdsInput(Module):
         )
         return cfg
 
-    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
-        super().__init__(cfg, parent=parent)
+    def _build_dataset(self) -> tf.data.Dataset:
         cfg = self.config
-        if cfg.is_training is None:
-            raise ValueError(f"{self.path()}: is_training must be specified explicitly")
         builder = tfds.builder(cfg.dataset_name, data_dir=cfg.data_dir)
         if cfg.download:
             logging.info("Downloading %s", cfg.dataset_name)
@@ -71,17 +104,12 @@ class TfdsInput(Module):
             split_ds = builder.as_dataset(split=cfg.split, batch_size=1)
             num_examples = len(split_ds)
             if num_examples % cfg.global_batch_size != 0:
-                raise ValueError(
-                    f"Evaluation dataset size ({num_examples}) must be divisible by "
-                    f"global_batch_size ({cfg.global_batch_size}"
+                logging.warning(
+                    "Evaluation dataset size %s is not divisible by global_batch_size %s",
+                    num_examples,
+                    cfg.global_batch_size,
                 )
         split = cfg.split
-        if cfg.global_batch_size % jax.process_count() != 0:
-            raise ValueError(
-                f"global_batch_size ({cfg.global_batch_size} must be divisible by "
-                f"process_count ({jax.process_count()})"
-            )
-        batch_size = cfg.global_batch_size // jax.process_count()
         if jax.process_count() > 1:
             split = tfds.even_splits(split, n=jax.process_count(), drop_remainder=cfg.is_training)[
                 jax.process_index()
@@ -108,17 +136,13 @@ class TfdsInput(Module):
                 reshuffle_each_iteration=True,
             )
         # It is safe to drop remainder for eval because the dataset size is divisible by global_batch_size.
-        ds = ds.batch(batch_size, drop_remainder=True)
+        ds = ds.batch(self._per_process_batch_size(), drop_remainder=True)
         if cfg.is_training:
             ds = ds.repeat()
         if cfg.prefetch_buffer_size is not None:
             ds = ds.prefetch(cfg.prefetch_buffer_size)
-        self._dataset = ds
+        return ds
 
     def _process_example(self, example):
         """Can be overridden by subclassses."""
         return example
-
-    def __iter__(self):
-        for example in self._dataset:
-            yield utils.as_tensor(example)

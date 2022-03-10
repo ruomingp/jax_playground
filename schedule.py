@@ -1,5 +1,5 @@
 import math
-from typing import Callable, List, Union
+from typing import Callable, List, Optional, Union
 
 import jax
 from jax import numpy as jnp
@@ -11,9 +11,11 @@ ScheduleFn = Callable[[Tensor], Tensor]
 Schedule = Union[float, Tensor, ScheduleFn, config_lib.InstantiableConfig]
 
 
-def as_schedule_fn(s: Schedule) -> ScheduleFn:
+def as_schedule_fn(s: Optional[Schedule]) -> ScheduleFn:
     if isinstance(s, (config_lib.InstantiableConfig, config_lib.FunctionConfig)):
         return s.instantiate()
+    if s is None:
+        s = 1.0
     if isinstance(s, float):
         return lambda step: float(s)
     assert callable(s), s
@@ -91,6 +93,13 @@ def exponential(
 
 def inverse_sqrt(step: int) -> float:
     return jnp.maximum(1, step) ** -0.5
+
+
+def adafactor(scale: float = 1.0, warmup_steps: int = 10_000) -> ScheduleFn:
+    def fn(count):
+        return scale * jnp.minimum(count / (warmup_steps**1.5), 1.0 / jnp.sqrt(count))
+
+    return fn
 
 
 def stepwise(sub: List[Schedule], start_step: List[int]) -> ScheduleFn:

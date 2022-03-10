@@ -1,21 +1,33 @@
+import copy
+import tempfile
 from typing import Any, Dict, Union
 
 import jax
+import jax.random
 import numpy as np
 import torch
 from absl import logging
 from absl.testing import parameterized
 from jax import numpy as jnp
+from transformers.models.gpt2 import modeling_gpt2 as hf_gpt2
 from transformers.models.roberta import modeling_roberta as hf_roberta
 from transformers.models.vit import modeling_vit as hf_vit
 
 from module import BaseLayer
 from module import functional as F
+from trainer import SpmdTrainer
 from utils import flatten_items, shapes
 
 
-def assert_allclose(a, b, atol=1e-6, rtol=1e-3):
-    np.testing.assert_allclose(a, b, atol=atol, rtol=rtol, err_msg=np.abs(a - b).max())
+def assert_allclose(a, b, atol=1e-6, rtol=1e-3, err_msg=""):
+    a, b = jnp.asarray(a).astype(np.float32), jnp.asarray(b).astype(np.float32)
+    np.testing.assert_allclose(
+        a,
+        b,
+        atol=atol,
+        rtol=rtol,
+        err_msg=f"{err_msg}: {np.abs(a - b).max()}",
+    )
 
 
 def as_jax_tensor(x: Union[jnp.ndarray, torch.Tensor, Dict[str, Any]]):
@@ -56,6 +68,8 @@ def parameters_from_torch_layer(src: Any):
         dst = _parameters_from_vit_classification(src)
     elif isinstance(src, hf_vit.ViTLayer):
         dst = _parameters_from_vit_layer(src)
+    elif isinstance(src, hf_gpt2.GPT2LMHeadModel):
+        dst = _parameters_from_gpt2_layer(src)
     else:
         raise NotImplementedError(f"{type(src)}")
     return as_jax_tensor(dst)
@@ -135,11 +149,12 @@ def _parameters_from_vit_encoder(
     dst = dict(
         cls_token=src_emb.cls_token,
         input_dropout=dict(),
+        transformer=dict(),
         pos_emb=dict(weight=src_emb.position_embeddings),
         output_norm=parameters_from_torch_layer(src_norm),
     )
     for layer_i, layer in enumerate(src_enc.layer):
-        dst[f"layer{layer_i}"] = parameters_from_torch_layer(layer)
+        dst["transformer"][f"layer{layer_i}"] = parameters_from_torch_layer(layer)
     return dst
 
 
@@ -172,16 +187,65 @@ def _parameters_from_vit_layer(src: hf_vit.ViTLayer):
     )
 
 
+def _parameters_from_gpt2_feed_forward(src: hf_gpt2.GPT2MLP, norm: torch.nn.LayerNorm):
+    return dict(
+        norm=parameters_from_torch_layer(norm),
+        linear1=dict(weight=src.c_fc.weight, bias=src.c_fc.bias),
+        dropout1=dict(),
+        linear2=dict(weight=src.c_proj.weight, bias=src.c_proj.bias),
+        dropout2=dict(),
+    )
+
+
+def _parameters_from_gpt2_attention(src: hf_gpt2.GPT2Attention, norm: torch.nn.LayerNorm):
+    # GPT2 attention weights are concat into one array, break out head and q/k/v dims.
+    num_heads = src.num_heads
+    attention = dict()
+    # Head projection.
+    c_attn_w = src.c_attn.weight.split(src.c_attn.weight.shape[-1] // 3, dim=-1)
+    c_attn_b = src.c_attn.bias.split(src.c_attn.bias.shape[-1] // 3, dim=-1)
+    for (w, b, proj) in zip(c_attn_w, c_attn_b, ("q_proj", "k_proj", "v_proj")):
+        attention[proj] = dict(
+            weight=w.reshape(w.shape[0], num_heads, -1), bias=b.reshape(num_heads, -1)
+        )
+    # Output projection.
+    c_proj_w = src.c_proj.weight
+    attention["o_proj"] = dict(
+        weight=c_proj_w.T.reshape(c_proj_w.shape[0], num_heads, -1), bias=src.c_proj.bias
+    )
+    attention["dropout"] = dict()
+    return dict(norm=parameters_from_torch_layer(norm), attention=attention, dropout=dict())
+
+
+def _parameters_from_gpt2_block_layer(src: hf_gpt2.GPT2Block):
+    return dict(
+        self_attention=_parameters_from_gpt2_attention(src.attn, src.ln_1),
+        feed_forward=_parameters_from_gpt2_feed_forward(src.mlp, src.ln_2),
+    )
+
+
+def _parameters_from_gpt2_layer(src: hf_gpt2.GPT2LMHeadModel):
+    ref_transformer = src.transformer
+    transformer = {
+        f"layer{i}": _parameters_from_gpt2_block_layer(l) for i, l in enumerate(ref_transformer.h)
+    }
+    return dict(
+        embedding_dropout=dict(),
+        emb=dict(weight=ref_transformer.wte.weight),
+        pos_emb=dict(weight=ref_transformer.wpe.weight[None, ...]),
+        transformer=transformer,
+        output_norm=parameters_from_torch_layer(ref_transformer.ln_f),
+        output_dropout=dict(),
+    )
+
+
 class TestCase(parameterized.TestCase):
     def _compute_layer_outputs(
         self, *, test_layer: BaseLayer, ref_layer: Any, test_inputs: Any, ref_inputs: Any
     ):
-        param_specs = test_layer.create_parameter_specs_recursively()
-        for name, param_spec in flatten_items(param_specs):
-            logging.info("Test: %s=%s", name, param_spec.shape)
-        layer_params = test_layer.initialize_parameters_recursively(
-            prng_key=jax.random.PRNGKey(0), param_specs=param_specs
-        )
+        layer_params = test_layer.initialize_parameters_recursively(prng_key=jax.random.PRNGKey(0))
+        for name, param in flatten_items(layer_params):
+            logging.info("Test: %s=%s", name, param.shape)
 
         for name, param in ref_layer.named_parameters():
             logging.info("Ref: %s=%s", name, param.shape)
@@ -202,3 +266,52 @@ class TestCase(parameterized.TestCase):
         ref_layer.eval()
         ref_outputs = ref_layer(ref_inputs)
         return test_outputs, ref_outputs
+
+    def assertNestedAllClose(self, a, b, atol=1e-6, rtol=1e-3):
+        a_items = flatten_items(a)
+        b_items = flatten_items(b)
+        self.assertEqual([name for name, _ in a_items], [name for name, _ in b_items])
+        for (a_name, a_value), (b_name, b_value) in zip(a_items, b_items):
+            self.assertEqual(a_name, b_name)
+            if isinstance(a_value, jnp.ndarray) or isinstance(b_value, jnp.ndarray):
+                a_value, b_value = jnp.asarray(a_value), jnp.asarray(b_value)
+                self.assertEqual(a_value.dtype, b_value.dtype, msg=f"{a_name}")
+                self.assertEqual(a_value.shape, b_value.shape, msg=f"{a_name}")
+                assert_allclose(a_value, b_value, atol=atol, rtol=rtol, err_msg=f"{a_name}")
+            else:
+                self.assertAlmostEqual(a_value, b_value)
+
+
+class TrainerConfigTestCase(TestCase):
+    """Base class for testing trainer configs."""
+
+    def _test_with_trainer_config(self, trainer_config, mesh_size: Dict[str, int] = {}):
+        cfg = copy.deepcopy(trainer_config)
+        cfg.dir = cfg.dir or tempfile.mkdtemp()
+        cfg.mesh_axis_names = cfg.mesh_axis_names or ("data", "model")
+        cfg.mesh_shape = cfg.mesh_shape or (len(jax.devices()), 1)
+        cfg.max_step = 3
+        trainer: SpmdTrainer = cfg.instantiate(parent=None)
+        trainer.run(jax.random.PRNGKey(123))
+
+        state_spec_map = dict(flatten_items(trainer.trainer_state_specs))
+        for path, value in flatten_items(trainer.trainer_state):
+            state_spec = state_spec_map.get(path)
+            logging.info(
+                "State: %s=%s(%s) state_spec=%s", path, value.dtype, value.shape, state_spec
+            )
+            if state_spec is None:
+                continue
+            self.assertSequenceEqual(value.shape, state_spec.shape)
+            self.assertLen(
+                state_spec.partition, len(value.shape), msg=f"{path}: {state_spec} vs {value.shape}"
+            )
+            for dim_size, dim_name in zip(value.shape, state_spec.partition):
+                if dim_name is None:
+                    continue
+                mesh_dim_size = mesh_size.get(dim_name, 1)
+                self.assertEqual(
+                    dim_size % mesh_dim_size,
+                    0,
+                    msg=f"{path}: {dim_size} % {mesh_dim_size} != 0 for {dim_name} in {value.shape} vs. {state_spec}",
+                )

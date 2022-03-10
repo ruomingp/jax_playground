@@ -1,14 +1,17 @@
 """Basic layers."""
 
+import math
 from typing import Callable, Dict
 
 import jax
+import numpy as np
 from jax import nn
 from jax import numpy as jnp
 
+import config
 import param_init
-from module import BaseLayer, NestedTensor, ParameterSpec, PartitionSpec
-from utils import Tensor, check_numerics
+from module import BaseLayer, FactorizationSpec, ParameterSpec
+from utils import Tensor
 
 
 def get_activation_fn(name) -> Callable[[Tensor], Tensor]:
@@ -32,14 +35,29 @@ class Dropout(BaseLayer):
         if not self.is_training or cfg.rate == 0:
             return x
         assert 0 < cfg.rate < 1
-        dropout = jax.random.bernoulli(
-            self.get_invocation_context().prng_key, p=cfg.rate, shape=x.shape
+        samples = jax.random.uniform(
+            self.prng_key, shape=x.shape, dtype=x.dtype, minval=0.0, maxval=1.0
         )
-        return jnp.where(dropout, jnp.zeros_like(x), x / (1.0 - cfg.rate))
+        dropout = jnp.floor(1 - cfg.rate + samples)
+        return x * dropout / (1.0 - cfg.rate)
+
+
+def set_dropout_rate_recursively(cfg: config.Config, dropout_rate: float):
+    def is_dropout_config(cfg):
+        return isinstance(cfg, config.InstantiableConfig) and issubclass(cfg.cls, Dropout)
+
+    def visit_fn(key, value):
+        if is_dropout_config(value):
+            value.rate = dropout_rate
+
+    def enter_fn(key, value, default_kv):
+        return None if is_dropout_config(value) else default_kv
+
+    cfg.visit(visit_fn=visit_fn, enter_fn=enter_fn)
 
 
 class LayerNorm(BaseLayer):
-    """Reference:"""
+    """Reference: https://arxiv.org/abs/1607.06450."""
 
     @classmethod
     def default_config(cls):
@@ -51,15 +69,16 @@ class LayerNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
-            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+            "scale": ParameterSpec(shape=[cfg.dim], partition=(None,)),
+            "bias": ParameterSpec(shape=[cfg.dim], partition=(None,)),
         }
 
     def forward(self, x: Tensor) -> Tensor:
         cfg = self.config
         x_dtype = x.dtype
         x = x.astype(jnp.float32)
-        x -= x.mean(axis=-1, keepdims=True)
+        x_mean = x.mean(axis=-1, keepdims=True)
+        x -= x_mean
         variance = (x * x).mean(axis=-1, keepdims=True)
         x = x * jax.lax.rsqrt(variance + cfg.eps)
         x = x.astype(x_dtype)
@@ -80,7 +99,7 @@ class RMSNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+            "scale": ParameterSpec(shape=[cfg.dim], partition=(None,)),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -108,8 +127,8 @@ class GroupNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
-            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+            "scale": ParameterSpec(shape=[cfg.dim], partition=(None,)),
+            "bias": ParameterSpec(shape=[cfg.dim], partition=(None,)),
         }
 
     def forward(self, x: Tensor) -> Tensor:
@@ -145,18 +164,18 @@ class BatchNorm(BaseLayer):
     def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
         cfg = self.config
         return {
-            "scale": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
-            "bias": ParameterSpec(shape=[cfg.dim], partition_spec=(None,)),
+            "scale": ParameterSpec(shape=[cfg.dim], partition=(None,)),
+            "bias": ParameterSpec(shape=[cfg.dim], partition=(None,)),
             "moving_mean": ParameterSpec(
                 shape=[cfg.dim],
                 dtype=jnp.float32,
-                partition_spec=(None,),
+                partition=(None,),
                 initializer=param_init.ConstantInitializer(0.0),
             ),
             "moving_variance": ParameterSpec(
                 shape=[cfg.dim],
                 dtype=jnp.float32,
-                partition_spec=(None,),
+                partition=(None,),
                 initializer=param_init.ConstantInitializer(1.0),
             ),
         }
@@ -203,12 +222,13 @@ class Linear(BaseLayer):
         params = dict(
             weight=ParameterSpec(
                 shape=(cfg.input_dim, cfg.output_dim),
-                partition_spec=cfg.param_partition_spec,
+                partition=cfg.param_partition_spec,
+                factorization=FactorizationSpec(axes=("row", "col")),
             )
         )
         if cfg.bias:
             params["bias"] = ParameterSpec(
-                shape=[cfg.output_dim], partition_spec=(cfg.param_partition_spec[-1],)
+                shape=[cfg.output_dim], partition=(cfg.param_partition_spec[-1],)
             )
         return params
 
@@ -247,12 +267,13 @@ class Conv2D(BaseLayer):
         params = dict(
             weight=ParameterSpec(
                 shape=list(cfg.window) + [cfg.input_dim, cfg.output_dim],
-                partition_spec=cfg.param_partition_spec,
+                partition=cfg.param_partition_spec,
+                factorization=FactorizationSpec(axes=(None, None, "row", "col")),
             )
         )
         if cfg.bias:
             params["bias"] = ParameterSpec(
-                shape=[cfg.output_dim], partition_spec=(cfg.param_partition_spec[-1],)
+                shape=[cfg.output_dim], partition=(cfg.param_partition_spec[-1],)
             )
         return params
 
@@ -265,3 +286,54 @@ class Conv2D(BaseLayer):
             dimension_numbers=("NHWC", "HWIO", "NHWC"),
             padding=cfg.padding,
         ) + self.parameters.get("bias", 0)
+
+
+class Embedding(BaseLayer):
+    """Implements an embedding lookup function.
+
+    Batched map for int in [0, <num_embeddings>) -> <dim> float vector.
+    """
+
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define("num_embeddings", 0, "Maximum number of embeddings in table.")
+        cfg.define("dim", 0, "Embedding vector dimensionality.")
+        cfg.param_partition_spec = (None, "model")
+        # By default, initialize to Gaussian with std=1/sqrt(dim), e.g., 0.036 when dim=768.
+        #
+        # This is the same as:
+        # https://github.com/google-research/t5x/blob/f7978d63448c43bdb339ae73fa557ba472be30d6/t5x/examples/scalable_t5/layers.py#L535
+        #
+        # PyTorch uses normal with std=1.0, regardless of dim/size:
+        # https://github.com/pytorch/pytorch/blob/febff45900e57d3e05ee72c1ecfe7d4fcbc582d9/torch/nn/modules/sparse.py#L149
+        #
+        # TensorFlow/Haiku use truncated normal with std=1.0
+        # https://github.com/deepmind/dm-haiku/blob/220c6b02a22f1ee9bea7dc8e017f3090108f75e4/haiku/_src/embed.py#L117
+        cfg.param_init = param_init.DefaultInitializer.default_config().set(
+            fan="fan_out", distribution="normal"
+        )
+        return cfg
+
+    def _create_layer_parameter_specs(self) -> Dict[str, ParameterSpec]:
+        cfg = self.config
+        return dict(
+            weight=ParameterSpec(
+                shape=[cfg.num_embeddings, cfg.dim],
+                partition=cfg.param_partition_spec,
+            )
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        emb = self.parameters["weight"]
+        return emb[x]
+
+    def attend(self, x: Tensor) -> Tensor:
+        """Apply query array 'x' to the embedding weight array.
+
+        Args:
+            x: array where last dimension equals 'dim'.
+        Returns:
+            Result of batched inner product of 'x' and embedding weight.
+        """
+        return jnp.einsum("bld,nd->bln", x, self.parameters["weight"])

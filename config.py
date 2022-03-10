@@ -79,12 +79,13 @@ def validate_config_field_value(value: Any) -> None:
     elif isinstance(value, dict):
         for _, v in value.items():
             validate_config_field_value(v)
-    elif dataclasses.is_dataclass(value):
-        validate_config_field_value(value.__dict__)
     elif value is None or isinstance(
-        value, (Config, type, types.FunctionType, int, float, str, enum.Enum, np.dtype)
+        value,
+        (Config, type, types.FunctionType, types.MethodType, int, float, str, enum.Enum, np.dtype),
     ):
         pass
+    elif dataclasses.is_dataclass(value):
+        validate_config_field_value(value.__dict__)
     else:
         raise InvalidConfigValueError(
             f'Invalid config value type {type(value)} for value "{value}"'

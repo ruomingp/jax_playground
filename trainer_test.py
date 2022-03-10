@@ -1,4 +1,3 @@
-import os.path
 import tempfile
 from typing import Optional
 
@@ -8,11 +7,11 @@ import numpy as np
 from absl import flags, logging
 from absl.testing import absltest, parameterized
 from jax import numpy as jnp
-from jax.experimental import maps, mesh_utils
 
 import config as config_lib
 import layers
 import learner
+import optimizers
 import param_init
 from checkpointer import Checkpointer
 from module import BaseLayer, Module, Tensor
@@ -112,13 +111,17 @@ class TrainerTest(parameterized.TestCase):
             return
         cfg = SpmdTrainer.default_config().set(name="test_trainer")
         cfg.dir = tempfile.mkdtemp()
+        if mesh_shape is not None:
+            cfg.mesh_axis_names = ("data", "model")
+        else:
+            cfg.mesh_axis_names = ("data",)
         cfg.mesh_shape = mesh_shape
         cfg.model = DummyModel.default_config().set(
             dtype=jnp.float32, param_init=param_init.DefaultInitializer.default_config()
         )
         cfg.input = DummyInput.default_config()
         cfg.learner = learner.Learner.default_config().set(
-            optimizer=config_lib.config_for_function(learner.sgd_optimizer).set(
+            optimizer=config_lib.config_for_function(optimizers.sgd_optimizer).set(
                 learning_rate=0.1,
                 momentum=0.9,
                 weight_decay=1e-4,
@@ -139,7 +142,7 @@ class TrainerTest(parameterized.TestCase):
             .set(name="ckpt", dir=trainer.checkpointer.config.dir)
             .instantiate(parent=None)
         )
-        restored_step, restored_state = ckpt.restore(step=None, state=trainer._state)
+        restored_step, restored_state = ckpt.restore(step=None, state=trainer._trainer_state)
         self.assertEqual(10, restored_step)
         trainer: SpmdTrainer = cfg.instantiate(parent=None)
         # Since we will be resuming from the checkpoint at step 10, a different prng_key doesn't matter.

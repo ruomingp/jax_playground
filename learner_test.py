@@ -3,68 +3,20 @@ from functools import partial
 import jax.nn
 import numpy as np
 import optax
-from absl.testing import absltest, parameterized
+from absl.testing import absltest
 from jax import numpy as jnp
 
 import schedule
-import utils
 from config import config_for_function
-from learner import Learner, LearnerState, chain, clip_by_global_norm, sgd_optimizer
-from module import PartitionSpec
+from learner import Learner, LearnerState
+from module import ParameterPartitionSpec, PartitionSpec
 from module import functional as F
+from optimizer_base import OptParam, OptStatePartitionSpec
+from optimizers import chain, clip_by_global_norm, sgd_optimizer
+from test_utils import TestCase
 
 
-class LearnerTest(parameterized.TestCase):
-    def assertNestedEqual(self, a, b):
-        a_kv = utils.flatten_items(a)
-        b_kv = utils.flatten_items(b)
-        self.assertCountEqual([k for k, _ in a_kv], [k for k, _ in b_kv])
-        a_dict = dict(a_kv)
-        b_dict = dict(b_kv)
-        for k in a_dict:
-            np.testing.assert_array_equal(a_dict[k], b_dict[k], err_msg=k)
-
-    @parameterized.parameters((0.1, 0), (0.1, 0.01))
-    def testSGD(self, learning_rate, weight_decay):
-        sgd = sgd_optimizer(learning_rate=learning_rate, weight_decay=weight_decay)
-        params = jnp.asarray([0, 1, 2, -3], dtype=jnp.float32)
-        state = sgd.init(params)
-
-        def loss(x):
-            return -jax.nn.log_softmax(x)[1]
-
-        loss, grads = jax.value_and_grad(loss)(params)
-        np.testing.assert_allclose(loss, 1.412078, atol=1e-6)
-        np.testing.assert_allclose(grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6)
-
-        updates, updated_state = sgd.update(grads, state=state, params=params)
-        np.testing.assert_allclose(
-            updates, -learning_rate * (grads + weight_decay * params), atol=1e-6
-        )
-
-        updated_params = optax.apply_updates(params, updates)
-        np.testing.assert_allclose(updated_params, params + updates, atol=1e-6)
-
-    @parameterized.parameters(None, 100.0, 0.1)
-    def testGradientClipping(self, max_norm):
-        clip = clip_by_global_norm(max_norm=max_norm)
-        params = jnp.asarray([0, 1, 2, -3], dtype=jnp.float32)
-        state = clip.init(params)
-
-        def loss(x):
-            return -jax.nn.log_softmax(x)[1]
-
-        loss, grads = jax.value_and_grad(loss)(params)
-        np.testing.assert_allclose(loss, 1.412078, atol=1e-6)
-        np.testing.assert_allclose(grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6)
-        g_norm = optax.global_norm(grads)
-
-        updates, updated_state = clip.update(grads, state=state, params=params)
-        if max_norm is None or g_norm < max_norm:
-            np.testing.assert_allclose(updates, grads, atol=1e-6)
-        else:
-            np.testing.assert_allclose(max_norm, optax.global_norm(updates))
-
+class LearnerTest(TestCase):
     def testLearner(self):
         learning_rate = config_for_function(schedule.stepwise).set(
             sub=[0.1, 0.01, 0.001],
@@ -85,31 +37,29 @@ class LearnerTest(parameterized.TestCase):
             .instantiate(parent=None)
         )
 
-        params = jnp.asarray([0, 1, 2, -3], dtype=jnp.float32)
+        params = OptParam(
+            value=jnp.asarray([0, 1, 2, -3], dtype=jnp.float32), factorization_spec=None
+        )
         state = learner.init(model_params=params)
 
         def loss(x):
             return -jax.nn.log_softmax(x)[1]
 
-        loss, grads = jax.value_and_grad(loss)(params)
+        loss, grads = jax.value_and_grad(loss)(params.value)
         np.testing.assert_allclose(loss, 1.412078, atol=1e-6)
         np.testing.assert_allclose(grads, [0.089629, -0.756364, 0.662272, 0.004462], atol=1e-6)
 
-        updated_params, output_collection = jax.jit(
-            partial(
-                F,
-                learner,
-                method="update",
-                is_training=True,
-            )
-        )(
+        updated_params, output_collection = F(
+            learner,
+            method="update",
+            is_training=True,
             prng_key=jax.random.PRNGKey(123),
             state=state,
             inputs=dict(gradients=grads, model_params=params),
         )
         np.testing.assert_allclose(
             updated_params,
-            params - learning_rate_fn(step) * (grads + weight_decay * params),
+            params.value - learning_rate_fn(step) * (grads + weight_decay * params.value),
             atol=1e-6,
         )
         summaries = output_collection.summaries
@@ -122,7 +72,7 @@ class LearnerTest(parameterized.TestCase):
             summaries,
         )
         state_updates = output_collection.state_updates
-        self.assertNestedEqual(
+        self.assertNestedAllClose(
             {
                 "optimizer": (
                     # clip_by_global_norm.
@@ -131,29 +81,35 @@ class LearnerTest(parameterized.TestCase):
                     (
                         optax.TraceState(trace=grads),
                         optax.EmptyState(),
-                        optax.ScaleByScheduleState(count=1),
+                        optax.ScaleByScheduleState(count=jnp.ones([], dtype=jnp.int32)),
                     ),
                 )
             },
             state_updates,
         )
 
-        self.assertEqual(
+        self.assertSequenceEqual(
             LearnerState(
                 optimizer=(
                     # clip_by_global_norm.
                     None,
                     # sgd.
                     (
-                        PartitionSpec(
-                            ("model",),
+                        optax.TraceState(
+                            trace=OptStatePartitionSpec(
+                                shape=(4,), partition=PartitionSpec("model")
+                            )
                         ),
-                        None,
-                        None,
+                        OptStatePartitionSpec(shape=None, partition=None),
+                        OptStatePartitionSpec(shape=None, partition=None),
                     ),
                 )
             ),
-            learner.create_state_partition_specs(PartitionSpec("model")),
+            learner.create_state_partition_specs(
+                ParameterPartitionSpec(
+                    shape=(4,), partition=PartitionSpec("model"), factorization=None
+                )
+            ),
         )
 
 

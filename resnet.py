@@ -214,7 +214,7 @@ class ResNetModel(BaseLayer):
             # Equivalent to kaiming_normal_(mode='fan_out', nonlinearity='relu').
             fan="fan_out",
             distribution="normal",
-            gain=math.sqrt(2),
+            scale=math.sqrt(2),
         )
         cfg.dtype = jnp.float32
         return cfg

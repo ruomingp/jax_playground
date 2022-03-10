@@ -9,14 +9,17 @@ from absl import logging
 from jax import numpy as jnp
 from jax.experimental import PartitionSpec, maps, mesh_utils
 from jax.experimental.pjit import pjit
+from tensorflow import summary as tf_summary
 
 import checkpointer
 import config as config_lib
 import learner
 import metrics
 import summary_writer
+import utils
 from module import Module, NestedPartitionSpec, NestedTensor
 from module import functional as F
+from optimizer_base import OptParam
 from utils import Tensor, flatten_items, tree_paths
 
 
@@ -51,7 +54,7 @@ class _SpmdRunner(Module):
         cfg = self.config
         self._add_child("input", cfg.input)
         self._add_child("summary_writer", cfg.summary_writer)
-        self._state = None
+        self._trainer_state = None
         self._jit_compute = None
 
     def _jit(self, fn: Callable, *, in_axis_resources, out_axis_resources, **kwargs):
@@ -100,14 +103,12 @@ class SpmdTrainer(_SpmdRunner):
             "mesh_shape",
             None,
             "The device mesh shape in the form of a tuple of ints. "
-            "Must have the same length as mesh_axis_names. "
-            "Defaults to (jax.device_count(), 1), "
-            "which represents a data-parallel mesh when the mesh axis names are ('data', 'model').",
+            "Must have the same length as mesh_axis_names. ",
         )
         cfg.define(
             "mesh_axis_names",
-            ("data", "model"),
-            "The mesh axis names. The names can be referenced in ParameterSpec.partition_spec.",
+            None,
+            "The mesh axis names. The names can be referenced in ParameterSpec.partition. ",
         )
         cfg.define("model", None, "The model config.")
         cfg.define("learner", None, "The learner config.")
@@ -137,9 +138,14 @@ class SpmdTrainer(_SpmdRunner):
         super().__init__(cfg, parent=parent)
         cfg = self.config
 
-        self._step: int = None
-        self._state: _TrainerState = None
+        with self.summary_writer.as_default():
+            tf_summary.text("trainer_config", cfg.debug_string().split("\n"), step=0)
 
+        self._step: int = None
+        self._trainer_state: _TrainerState = None
+
+        if cfg.model.dtype is None:
+            raise ValueError(f"dtype must be explicitly specified for {self.path()}.model")
         self._add_child("model", cfg.model)
         self._add_child("learner", cfg.learner)
 
@@ -153,19 +159,30 @@ class SpmdTrainer(_SpmdRunner):
             )
             self._evalers.append(self._add_child(evaler_name, evaler_cfg))
 
-        self._model_param_specs = self.model.create_parameter_specs_recursively()
-        model_param_partition_specs = jax.tree_map(
-            lambda spec: PartitionSpec(*spec.partition_spec), self._model_param_specs
+        self._model_param_partition_specs = self.model.create_partition_specs_recursively()
+        total_num_params = 0
+        for name, spec in flatten_items(self._model_param_partition_specs):
+            self._step_log("Model param partition: %s=%s", name, spec)
+            size = 1
+            for dim in spec.shape:
+                size *= dim
+            total_num_params += size
+        self._step_log("Total number of params: %s", f"{total_num_params:,}")
+
+        self._learner_state_partition_specs = self.learner.create_state_partition_specs(
+            self._model_param_partition_specs
         )
-        for path, spec in flatten_items(model_param_partition_specs):
-            self._step_log("Model param partition: %s=%s", path, spec)
-        learner_state_partition_specs = self.learner.create_state_partition_specs(
-            model_param_partition_specs
+        for name, spec in flatten_items(self._learner_state_partition_specs):
+            self._step_log("Learner state partition: %s=%s", name, spec)
+        self._trainer_state_specs = _TrainerState(
+            prng_key=None,
+            model=self._model_param_partition_specs,
+            learner=self._learner_state_partition_specs,
         )
         self._trainer_state_partition_specs = _TrainerState(
             prng_key=None,
-            model=model_param_partition_specs,
-            learner=learner_state_partition_specs,
+            model=jax.tree_map(lambda spec: spec.partition, self._model_param_partition_specs),
+            learner=jax.tree_map(lambda spec: spec.partition, self._learner_state_partition_specs),
         )
         self._jit_train_step = self._jit(
             self._train_step,
@@ -184,11 +201,19 @@ class SpmdTrainer(_SpmdRunner):
             donate_argnums=(0,),  # donate the state
         )
         for evaler_name in cfg.evalers:
-            self._children[evaler_name].init(self.model, model_param_partition_specs)
+            self._children[evaler_name].init(self.model, self._trainer_state_partition_specs.model)
 
     @property
     def step(self):
         return self._step
+
+    @property
+    def trainer_state(self):
+        return self._trainer_state
+
+    @property
+    def trainer_state_specs(self):
+        return self._trainer_state_specs
 
     def _step_log(self, msg, *args, **kwargs):
         logging.info(
@@ -203,9 +228,16 @@ class SpmdTrainer(_SpmdRunner):
     def run(self, prng_key: jax.random.KeyArray) -> Optional[NestedTensor]:
         cfg = self.config
         jax.config.update("jax_log_compiles", True)
-        mesh_shape = cfg.mesh_shape or (jax.device_count(), 1)
-        devices = mesh_utils.create_device_mesh(mesh_shape)
+        devices = mesh_utils.create_device_mesh(cfg.mesh_shape)
         mesh = maps.Mesh(devices, cfg.mesh_axis_names)
+        self._step_log(
+            "Devices: global=%s local=%s %s",
+            jax.device_count(),
+            jax.local_device_count(),
+            jax.local_devices(),
+        )
+        self._step_log("Global mesh: %s %s", cfg.mesh_shape, mesh)
+        self._step_log("Local mesh: %s", mesh.local_mesh)
         with maps.mesh(mesh.devices, mesh.axis_names):
             self._init(prng_key)
 
@@ -218,6 +250,7 @@ class SpmdTrainer(_SpmdRunner):
             output = None
             stop_trace_step = None
             for input_batch in self.input:
+                logging.log_first_n(logging.INFO, "input_batch=%s", 3, utils.shapes(input_batch))
                 if self.step == stop_trace_step:
                     assert output is not None
                     jax.tree_map(lambda x: x.block_until_ready(), output)
@@ -254,10 +287,13 @@ class SpmdTrainer(_SpmdRunner):
     def _init(self, prng_key: jax.random.KeyArray):
         def _init_state(prng_key: jax.random.KeyArray):
             prng_key, init_key = jax.random.split(prng_key)
-            model_params = self.model.initialize_parameters_recursively(
-                init_key, self._model_param_specs
+            model_params = self.model.initialize_parameters_recursively(init_key)
+            opt_params = jax.tree_map(
+                lambda param, spec: OptParam(value=param, factorization_spec=spec.factorization),
+                model_params,
+                self._model_param_partition_specs,
             )
-            learner_params = self.learner.init(model_params)
+            learner_params = self.learner.init(opt_params)
             return _TrainerState(
                 prng_key=prng_key,
                 model=model_params,
@@ -271,19 +307,29 @@ class SpmdTrainer(_SpmdRunner):
         )
         self._step_log("Initializing states")
         self._step = None
-        self._state = init_computation(prng_key)
-        flat_paths, _ = jax.tree_flatten(tree_paths(self._state))
-        flat_values, _ = jax.tree_flatten(self._state)
-        for path, value in zip(flat_paths, flat_values):
-            self._step_log("State: %s=%s(%s)", path, value.dtype, value.shape)
+        self._trainer_state = init_computation(prng_key)
+        total_state_bytes = 0
+        state_spec_map = dict(flatten_items(self.trainer_state_specs))
+        for path, value in flatten_items(self._trainer_state):
+            self._step_log(
+                "State: %s=%s(%s) partition=%s",
+                path,
+                value.dtype,
+                value.shape,
+                state_spec_map.get(path),
+            )
+            total_state_bytes += value.nbytes
+        self._step_log("Process state size: %.2f GB", total_state_bytes / 1024**3)
 
         # Try to restore the latest checkpoint.
-        self._step, self._state = self.checkpointer.restore(step=None, state=self._state)
+        self._step, self._trainer_state = self.checkpointer.restore(
+            step=None, state=self._trainer_state
+        )
         if self.step is None:
             self._step = 0
             # TODO(ruoming): enable saving of the initial state for debugging.
             # logging.info("Checkpoint not found. Save the initial checkpoint.")
-            # self.checkpointer.save(step=self.step, state=self._state)
+            # self.checkpointer.save(step=self.step, state=self._trainer_state)
 
     def _run_step(self, input_batch: NestedTensor) -> NestedTensor:
         """Runs a single training step.
@@ -296,7 +342,7 @@ class SpmdTrainer(_SpmdRunner):
         """
         with jax.profiler.StepTraceAnnotation("train", step_num=self.step):
             # Note(Jan 2022): pjit currently requires all parameters to be specified as positional args.
-            self._state, outputs = self._jit_train_step(self._state, input_batch)
+            self._trainer_state, outputs = self._jit_train_step(self._trainer_state, input_batch)
 
         if self.step % 100 == 0:
             self._step_log(
@@ -307,14 +353,14 @@ class SpmdTrainer(_SpmdRunner):
 
         self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
         # Note: we will use the same eval key as the training keys of the future step, which should be okay.
-        prng_key = self._state.prng_key
+        prng_key = self._trainer_state.prng_key
         for evaler in self._evalers:
             prng_key = evaler.eval_step(
                 self.step,
                 prng_key=prng_key,
-                model_params=self._state.model,
+                model_params=self._trainer_state.model,
             )
-        self.checkpointer.save(step=self.step, state=self._state)
+        self.checkpointer.save(step=self.step, state=self._trainer_state)
         return {"loss": outputs["loss"], "aux": outputs["aux"]}
 
     def _train_step(
@@ -339,13 +385,19 @@ class SpmdTrainer(_SpmdRunner):
             state.model, jax.tree_map(lambda x: jnp.asarray(x), input_batch)
         )
 
+        opt_params = jax.tree_map(
+            lambda param, spec: OptParam(value=param, factorization_spec=spec.factorization),
+            state.model,
+            self._model_param_partition_specs,
+        )
+
         updated_model_params, learner_output_collection = F(
             self.learner,
             method="update",
             state=state.learner,
             is_training=True,
             prng_key=learner_key,
-            inputs=dict(model_params=state.model, gradients=grads),
+            inputs=dict(model_params=opt_params, gradients=grads),
         )
         updated_state = _TrainerState(
             prng_key=new_prng_key,

@@ -41,7 +41,7 @@ def main(argv):
 
     f = pjit(mlp, in_axis_resources=(param_spec, x_spec), out_axis_resources=y_spec)
 
-    # Sends data to accelerators based on partition_spec
+    # Sends data to accelerators based on partition
     with maps.mesh(mesh.devices, mesh.axis_names):
         y = f(params, x)
     print(y)

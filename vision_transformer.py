@@ -4,16 +4,16 @@ References:
 - https://github.com/google-research/vision_transformer/blob/main/vit_jax/models.py
 """
 import math
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import jax.nn
 from jax import numpy as jnp
 
 import config as config_lib
 import param_init
-from attention import LearnedPositionalEmbedding, TransformerLayer
+from attention import LearnedPositionalEmbedding, RepeatedTransformerLayer, StackedTransformerLayer
 from config import config_for_class
-from layers import Conv2D, Dropout, LayerNorm, Linear
+from layers import Conv2D, Dropout, LayerNorm, Linear, set_dropout_rate_recursively
 from metrics import WeightedScalar
 from module import BaseLayer, Module, NestedTensor, ParameterSpec, Tensor
 from param_init import DefaultInitializer, GaussianInitializer
@@ -53,7 +53,7 @@ class ResNetEncoder(BaseLayer):
             # Equivalent to kaiming_normal_(mode='fan_out', nonlinearity='relu').
             fan="fan_out",
             distribution="normal",
-            gain=math.sqrt(2),
+            scale=math.sqrt(2),
         )
         cfg.dtype = jnp.float32
         return cfg
@@ -169,19 +169,17 @@ class TransformerSequenceEncoder(BaseLayer):
         )
         # https://github.com/google-research/vision_transformer/blob/dc8ddbcdeefd281d6cc7fea0c97355495688ca9c/vit_jax/models.py#L189
         cfg.pos_emb.param_init = config_for_class(GaussianInitializer).set(std=0.02)
-        cfg.define("num_layers", 0, "The number of layers.")
         cfg.define(
             "transformer",
-            TransformerLayer.default_config(),
-            "The transformer layer config.",
+            StackedTransformerLayer.default_config(),
+            "The transformer layer stack config.",
         )
         # Vision transformer uses 'gelu' and dropout=0.1 by default.
-        cfg.transformer.feed_forward.activation = "nn.gelu"
-        cfg.transformer.feed_forward.dropout.rate = 0.1
-        cfg.transformer.feed_forward.norm = layer_norm_config()
-        cfg.transformer.self_attention.dropout.rate = 0.1
-        cfg.transformer.self_attention.attention.dropout.rate = 0.1
-        cfg.transformer.self_attention.norm = layer_norm_config()
+        set_dropout_rate_recursively(cfg, dropout_rate=0.1)
+        transformer_layer_cfg = cfg.transformer.layer
+        transformer_layer_cfg.feed_forward.activation = "nn.gelu"
+        transformer_layer_cfg.feed_forward.norm = layer_norm_config()
+        transformer_layer_cfg.self_attention.norm = layer_norm_config()
         cfg.define(
             "global_feature_extraction",
             None,
@@ -202,8 +200,8 @@ class TransformerSequenceEncoder(BaseLayer):
         cfg = self.config
         self._add_child("input_dropout", cfg.input_dropout)
         self._add_child("pos_emb", cfg.pos_emb.set(dim=cfg.input_dim))
-        for i in range(cfg.num_layers):
-            self._add_child(f"layer{i}", cfg.transformer.set(input_dim=cfg.input_dim))
+        cfg.transformer.layer.input_dim = cfg.input_dim
+        self._add_child("transformer", cfg.transformer)
         if cfg.global_feature_extraction not in ("cls_token", "gap"):
             raise NotImplementedError(
                 f"Unsupported global_feature_extraction: {cfg.global_feature_extraction}. "
@@ -217,7 +215,7 @@ class TransformerSequenceEncoder(BaseLayer):
         if cfg.global_feature_extraction == "cls_token":
             param_specs["cls_token"] = ParameterSpec(
                 shape=(1, 1, cfg.input_dim),
-                partition_spec=(None, None, "model"),
+                partition=(None, None, "model"),
                 initializer=param_init.ConstantInitializer(0.0),
             )
         return param_specs
@@ -232,8 +230,7 @@ class TransformerSequenceEncoder(BaseLayer):
             )
         x = self.input_dropout(inputs)
         x += self.pos_emb(x)
-        for i in range(cfg.num_layers):
-            x = self.children[f"layer{i}"](x).data
+        x = self.transformer(x).data
         x = self.output_norm(x)
         if cfg.global_feature_extraction == "cls_token":
             x = x[:, 0, :]
@@ -266,6 +263,10 @@ class Model(BaseLayer):
             1000,
             "The number of classification classes.",
         )
+        # https://github.com/google-research/vision_transformer/blob/e7d87a59784503b5bd8825ec368bca17822fb959/vit_jax/models.py#L76.
+        cfg.param_init = param_init.DefaultInitializer.default_config().set(
+            fan="fan_avg", distribution="uniform"
+        )
         return cfg
 
     def __init__(self, cfg: config_lib.Config, *, parent: Module):
@@ -289,7 +290,10 @@ class Model(BaseLayer):
 
     def forward(self, image: Tensor, label: Tensor) -> Tuple[Tensor, NestedTensor]:
         cfg = self.config
-        x = self.encoder_2d(image)
+        self.vlog(
+            3, "image=%s(%s) label=%s(%s)", image.dtype, image.shape, label.dtype, label.shape
+        )
+        x = self.encoder_2d(image.astype(self.dtype()))
         x = self.convert_to_sequence(x)
         x = self.encoder_1d(x)
         logits = self.classifier(x)
@@ -305,3 +309,88 @@ class Model(BaseLayer):
         self.add_summary("loss", WeightedScalar(loss, num_examples))
         self.add_summary("accuracy", WeightedScalar(accuracy, num_examples))
         return loss, {"logits": logits}
+
+
+_NAMED_VIT_MODELS = {
+    "Test16": dict(num_layers=3, model_dim=8, num_heads=4),
+    # Table 1 of https://arxiv.org/pdf/2010.11929.pdf.
+    "B16": dict(num_layers=12, model_dim=768, num_heads=12),
+    "B32": dict(num_layers=12, model_dim=768, num_heads=12, patch_size=(32, 32)),
+    "L16": dict(num_layers=24, model_dim=1024, num_heads=16),
+    "L32": dict(num_layers=24, model_dim=1024, num_heads=16, patch_size=(32, 32)),
+    # When patch_size=(14, 14), use global average pooling for feature extraction so that the sequence length is 256
+    # instead of 257.
+    "H14": dict(
+        num_layers=32,
+        model_dim=1280,
+        num_heads=16,
+        patch_size=(14, 14),
+        global_feature_extraction="gap",
+        dtype=jnp.bfloat16,
+    ),
+    # Table 2 of https://arxiv.org/pdf/2106.04560.pdf.
+    "G14": dict(
+        num_layers=48,
+        model_dim=1664,
+        num_heads=16,
+        feed_forward_dim=8192,
+        patch_size=(14, 14),
+        global_feature_extraction="gap",
+        dtype=jnp.bfloat16,
+        dropout_rate=0.0,
+    ),
+}
+
+
+def _set_model_config(
+    cfg,
+    *,
+    num_layers: int,
+    model_dim: int,
+    num_heads: int,
+    feed_forward_dim: Optional[int] = None,
+    image_size: Tuple[int, int] = (224, 224),
+    patch_size: Tuple[int, int] = (16, 16),
+    global_feature_extraction: str = "cls_token",
+    dtype: jnp.dtype = jnp.float32,
+    dropout_rate: float = 0.1,
+    transformer_stack_cfg: Optional[config_lib.InstantiableConfig] = None,
+):
+    cfg.dtype = dtype
+    if not all(i % p == 0 for i, p in zip(image_size, patch_size)):
+        raise ValueError(f"patch_size ({patch_size}) must divide image_size ({image_size}) evenly")
+    cfg.convert_to_sequence.patch_size = patch_size
+    encoder_cfg = cfg.encoder_1d
+    encoder_cfg.set(
+        input_dim=model_dim,
+        global_feature_extraction=global_feature_extraction,
+    )
+    if transformer_stack_cfg is not None:
+        encoder_cfg.transformer = transformer_stack_cfg
+    encoder_cfg.transformer.num_layers = num_layers
+    seq_len = (image_size[0] // patch_size[0]) * (image_size[1] // patch_size[1]) + (
+        1 if global_feature_extraction == "cls_token" else 0
+    )
+    encoder_cfg.pos_emb.shape = (seq_len,)
+    feed_forward_dim = feed_forward_dim or model_dim * 4
+    encoder_cfg.transformer.layer.feed_forward.hidden_dim = feed_forward_dim
+    encoder_cfg.transformer.layer.self_attention.attention.num_heads = num_heads
+    set_dropout_rate_recursively(cfg, dropout_rate)
+
+
+def named_model_configs() -> config_lib.InstantiableConfig:
+    models = dict(**_NAMED_VIT_MODELS)
+    # G/14 with RepeatedTransformerLayer.
+    models["G14-repeat"] = dict(
+        **models["G14"],
+        transformer_stack_cfg=RepeatedTransformerLayer.default_config().set(
+            layer=TransformerSequenceEncoder.default_config().transformer.layer
+        ),
+    )
+
+    config_map = {}
+    for model_name, model_settings in models.items():
+        cfg = Model.default_config()
+        _set_model_config(cfg, **model_settings)
+        config_map[model_name] = cfg
+    return config_map

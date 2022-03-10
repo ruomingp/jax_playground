@@ -12,11 +12,19 @@ import tensorflow as tf
 from absl import logging
 
 import config as config_lib
+import utils
 from input_tfds import TfdsInput
 from module import Module
 
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
+
+
+def _whiten(image: np.ndarray) -> tf.Tensor:
+    image = tf.cast(tf.convert_to_tensor(image), tf.float32)
+    image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
+    image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
+    return image
 
 
 def _random_crop(
@@ -79,7 +87,7 @@ class ImagenetInput(TfdsInput):
         logging.debug("example=%s", example.keys())
         image = example["image"]
         logging.info("image=%s", type(image))
-        image = tf.cast(tf.convert_to_tensor(image), tf.float32)
+        image = _whiten(image)
         if cfg.is_training:
             image = _random_crop(image)
             image = tf.image.random_flip_left_right(image)
@@ -91,8 +99,6 @@ class ImagenetInput(TfdsInput):
                 [image], cfg.eval_resize, method=tf.image.ResizeMethod.BILINEAR
             )[0]
             image = _central_crop(image, cfg.image_size)
-        image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
-        image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
         return {"image": image, "label": example["label"]}
 
 
@@ -129,19 +135,19 @@ class FakeImagenetInput(Module):
                 f"must be positive and divisible by process count ({jax.process_count()})"
             )
         batch_size = cfg.global_batch_size // jax.process_count()
-        return dict(
-            image=jax.random.randint(
-                image_key,
-                shape=[batch_size, 224, 224, 3],
-                minval=0,
-                maxval=256,
-                dtype=np.int32,
-            ),
-            label=jax.random.randint(
-                label_key,
-                shape=[batch_size],
-                minval=0,
-                maxval=1000,
-                dtype=np.int32,
-            ),
+        image = jax.random.randint(
+            image_key,
+            shape=[batch_size, 224, 224, 3],
+            minval=0,
+            maxval=256,
+            dtype=np.int32,
         )
+        image = _whiten(image)
+        label = jax.random.randint(
+            label_key,
+            shape=[batch_size],
+            minval=0,
+            maxval=1000,
+            dtype=np.int32,
+        )
+        return utils.as_tensor(dict(image=image, label=label))

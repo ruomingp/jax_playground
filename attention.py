@@ -8,8 +8,7 @@ pair). mask=None represents an all-zero mask---no position pair is masked.
 """
 
 import math
-from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, NamedTuple, Optional
 
 import jax
 from jax import numpy as jnp
@@ -17,8 +16,10 @@ from jax import numpy as jnp
 import config as config_lib
 import param_init
 from layers import Dropout, LayerNorm, Linear, get_activation_fn
-from module import BaseLayer, Module, ParameterSpec
-from utils import Tensor, check_numerics
+from module import BaseLayer, FactorizationSpec, Module, ParameterSpec
+from pipeline import Pipeline
+from repeat import Repeat
+from utils import Tensor, check_numerics, shapes
 
 
 def make_causal_mask(seq_len: int) -> Tensor:
@@ -76,7 +77,7 @@ class LearnedPositionalEmbedding(BaseLayer):
         return dict(
             weight=ParameterSpec(
                 shape=[1] + list(cfg.shape) + [cfg.dim],
-                partition_spec=cfg.param_partition_spec,
+                partition=cfg.param_partition_spec,
             )
         )
 
@@ -152,15 +153,15 @@ class MultiheadLinearInit(param_init.DefaultInitializer):
         cfg.define("type", None, '"input" or "output"')
         return cfg
 
-    def calculate_fan_in_and_fan_out(self, name: str, shape: param_init.Shape):
+    def _compute_fan_axes(self, name: str, shape: param_init.Shape) -> param_init.FanAxes:
         cfg = self.config
         if len(shape) != 3:
+            # model_dim, num_heads, per_head_dim = tuple(shape)
             raise ValueError(f"Unexpected parameter shape {shape}")
-        model_dim, num_heads, per_head_dim = tuple(shape)
         if cfg.type == "input":
-            return model_dim, num_heads * per_head_dim
+            return param_init.FanAxes(in_axis=0, out_axis=(1, 2))
         elif cfg.type == "output":
-            return num_heads * per_head_dim, model_dim
+            return param_init.FanAxes(in_axis=(1, 2), out_axis=0)
         else:
             raise NotImplementedError(f"Unknown linear type ({cfg.type})")
 
@@ -189,14 +190,12 @@ class _BaseMultiheadLinear(BaseLayer):
         params = dict(
             weight=ParameterSpec(
                 shape=(cfg.model_dim, cfg.num_heads, cfg.per_head_dim),
-                partition_spec=cfg.param_partition_spec,
+                partition=cfg.param_partition_spec,
+                factorization=FactorizationSpec(axes=("row", None, "col")),
             )
         )
         if cfg.bias:
-            params["bias"] = ParameterSpec(
-                shape=self._bias_shape,
-                partition_spec=[cfg.param_partition_spec[-1]],
-            )
+            params["bias"] = self._bias_spec
         return params
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -216,9 +215,12 @@ class MultiheadInputLinear(_BaseMultiheadLinear):
         return "btd,dnh->btnh"
 
     @property
-    def _bias_shape(self):
+    def _bias_spec(self):
         cfg = self.config
-        return cfg.num_heads, cfg.per_head_dim
+        return ParameterSpec(
+            shape=(cfg.num_heads, cfg.per_head_dim),
+            partition=cfg.param_partition_spec[-2:],
+        )
 
 
 class MultiheadOutputLinear(_BaseMultiheadLinear):
@@ -232,9 +234,12 @@ class MultiheadOutputLinear(_BaseMultiheadLinear):
         return "btnh,dnh->btd"
 
     @property
-    def _bias_shape(self):
+    def _bias_spec(self):
         cfg = self.config
-        return (cfg.model_dim,)
+        return ParameterSpec(
+            shape=(cfg.model_dim,),
+            partition=cfg.param_partition_spec[:1],
+        )
 
 
 def masked_softmax(logits: Tensor, mask: Optional[Tensor] = None):
@@ -323,8 +328,7 @@ class MultiheadAttention(BaseLayer):
             raise ValueError(f"num_heads ({cfg.num_heads}) must divide hidden_dim ({hidden_dim})")
         return hidden_dim // cfg.num_heads
 
-    @dataclass
-    class Output:
+    class Output(NamedTuple):
         # [batch, target_length, output_dim]. The attention output.
         data: Tensor
         # [batch, num_heads, target_length, source_length]. The attention probabilities.
@@ -355,18 +359,15 @@ class MultiheadAttention(BaseLayer):
         k_proj = self.k_proj(key)
         v_proj = self.v_proj(value)
         logits = jnp.einsum("btnh,bsnh->bnts", q_proj, k_proj)
-        # logging.info("MultiheadAttention.logits=%s", logits[0, 0, 0].reshape([-1]))
         if mask is not None and mask.ndim == 3:
             # [batch, 1, target_length, source_length].
             mask = mask[:, None, :, :]
         probs = masked_softmax(logits, mask=mask)
         probs = self.dropout(probs)
-        self.add_summary("atten_probs", probs)
-        context = jnp.einsum("bnts,bsnh->btnh", probs, v_proj)
-        # logging.info("MultiheadAttention.context=%s", context[0, 0].reshape([-1]))
+        context = jnp.einsum("bnts,bsnh->btnh", probs, v_proj).astype(v_proj.dtype)
         # [batch, target_length, output_dim].
         outputs = self.o_proj(context)
-        return self.Output(data=outputs, probs=probs)
+        return self.Output(data=outputs, probs=probs[0])
 
 
 class TransformerAttentionLayer(BaseLayer):
@@ -407,8 +408,7 @@ class TransformerAttentionLayer(BaseLayer):
         )
         self._add_child("dropout", cfg.dropout)
 
-    @dataclass
-    class Output:
+    class Output(NamedTuple):
         # [batch, target_length, output_dim]. The attention output.
         data: Tensor
         # The attention probabilities returned by the attention layer.
@@ -446,7 +446,6 @@ class TransformerAttentionLayer(BaseLayer):
             if source is None:
                 source = target  # self attention
             atten_output = self.attention(query=target, key=source, value=source, mask=mask)
-            # logging.info("atten_output=%s", atten_output.data[0, 0])
             # Post-norm: norm applied on the sum of input and attention output.
             data = self.norm(target + self.dropout(atten_output.data))
         else:
@@ -558,8 +557,7 @@ class TransformerLayer(BaseLayer):
         if cfg.cross_attention is not None:
             self._add_child("cross_attention", cfg.cross_attention.set(target_dim=cfg.input_dim))
 
-    @dataclass
-    class Output:
+    class Output(NamedTuple):
         # [batch, target_length, output_dim]. The attention output.
         data: Tensor
         # The attention probabilities returned by the self-attention layer.
@@ -591,3 +589,131 @@ class TransformerLayer(BaseLayer):
             self_attention_probs=self_atten_outputs.probs,
             cross_attention_probs=cross_attention_probs,
         )
+
+
+class StackedTransformerLayer(BaseLayer):
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define("num_layers", None, "The number of layers in the stack.")
+        cfg.define(
+            "layer", TransformerLayer.default_config(), "Config for each layer in the stack."
+        )
+        return cfg
+
+    def __init__(self, cfg: config_lib.Config, *, parent: Optional[Module]):
+        super().__init__(cfg, parent=parent)
+        cfg = self.config
+        self._layers = []
+        for i in range(cfg.num_layers):
+            self._layers.append(self._add_child(f"layer{i}", cfg.layer))
+
+    def forward(
+        self,
+        data: Tensor,
+        *,
+        self_attention_mask: Optional[Tensor] = None,
+        cross_attention_data: Optional[Tensor] = None,
+        cross_attention_mask: Optional[Tensor] = None,
+    ) -> TransformerLayer.Output:
+        all_layer_outputs = []
+        for layer in self._layers:
+            layer_outputs: TransformerLayer.Output = layer(
+                data,
+                self_attention_mask=self_attention_mask,
+                cross_attention_data=cross_attention_data,
+                cross_attention_mask=cross_attention_mask,
+            )
+            all_layer_outputs.append(layer_outputs)
+            data = layer_outputs.data
+        aux_outputs = {}
+        for field in TransformerLayer.Output._fields:
+            if field == "data":
+                continue
+            values = [getattr(output, field) for output in all_layer_outputs]
+            if any(v is None for v in values):
+                assert all(v is None for v in values), f"{field}: {values}"
+                aux_outputs[field] = None
+            else:
+                aux_outputs[field] = jnp.stack(values, axis=0)
+
+        return TransformerLayer.Output(data=data, **aux_outputs)
+
+
+class RepeatedTransformerLayer(Repeat):
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.layer = TransformerLayer.default_config()
+        return cfg
+
+    def forward(
+        self,
+        data: Tensor,
+        *,
+        self_attention_mask: Optional[Tensor] = None,
+        cross_attention_data: Optional[Tensor] = None,
+        cross_attention_mask: Optional[Tensor] = None,
+    ) -> TransformerLayer.Output:
+        def layer_fn(carry, x_i):
+            layer_outputs: TransformerLayer.Output = self.layer(
+                carry,
+                self_attention_mask=self_attention_mask,
+                cross_attention_data=cross_attention_data,
+                cross_attention_mask=cross_attention_mask,
+            )
+            return layer_outputs.data, {
+                k: v for k, v in layer_outputs._asdict().items() if k != "data"
+            }
+
+        repeat_outputs: Repeat.Output = self._run(layer_fn, data)
+        ys = repeat_outputs.ys
+        return TransformerLayer.Output(data=repeat_outputs.carry, **ys)
+
+
+class PipelinedTransformerLayer(Pipeline):
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.define("microbatch_size", -1, "The microbatch size.")
+        cfg.layer = TransformerLayer.default_config()
+        return cfg
+
+    def forward(
+        self,
+        data: Tensor,
+        *,
+        self_attention_mask: Optional[Tensor] = None,
+        cross_attention_data: Optional[Tensor] = None,
+        cross_attention_mask: Optional[Tensor] = None,
+    ) -> TransformerLayer.Output:
+        cfg = self.config
+
+        carry_in = dict(data=data)
+        # Even though masks do not change across layers, we include them in the carry so that they are aligned with the
+        # microbatches.
+        if self_attention_mask is not None:
+            carry_in["self_attention_mask"] = self_attention_mask
+        if cross_attention_data is not None:
+            carry_in["cross_attention_data"] = cross_attention_data
+        if cross_attention_mask is not None:
+            carry_in["cross_attention_mask"] = cross_attention_mask
+
+        carry_in = self._to_microbatches(carry_in, microbatch_size=cfg.microbatch_size)
+        self.vlog(3, "carry_in=%s", shapes(carry_in))
+
+        def layer_fn(carry, x_i):
+            layer_outputs: TransformerLayer.Output = self.layer(**carry)
+            carry.pop("data")
+            return dict(**carry, data=layer_outputs.data), {
+                k: v for k, v in layer_outputs._asdict().items() if k != "data"
+            }
+
+        pipeline_outputs: Pipeline.Output = self._run(layer_fn, carry_in)
+        carry_out = self._from_microbatches(pipeline_outputs.carry["data"])
+
+        ys = pipeline_outputs.ys
+        self.vlog(3, "ys=%s", shapes(ys))
+        # Take only the first microbatch for *_attention_probs.
+        ys = jax.tree_map(lambda y: y[:, 0], ys)
+        return TransformerLayer.Output(data=carry_out, **ys)

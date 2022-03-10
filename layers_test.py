@@ -1,4 +1,5 @@
 import copy
+import itertools
 import math
 from typing import Tuple, Union
 
@@ -8,15 +9,12 @@ import torch
 from absl.testing import absltest, parameterized
 from jax import numpy as jnp
 
+import module
 import utils
-from layers import BatchNorm, Conv2D, LayerNorm, Linear, RMSNorm
+from layers import BatchNorm, Conv2D, Embedding, LayerNorm, Linear, RMSNorm
 from module import BaseLayer
 from module import functional as F
-from test_utils import TestCase, as_jax_tensor, as_torch_tensor, assert_allclose
-
-
-def _shapes(nested_tensor):
-    return jax.tree_map(lambda x: tuple(x.shape), nested_tensor)
+from test_utils import TestCase, as_jax_tensor, as_torch_tensor, assert_allclose, shapes
 
 
 def _copy(src: jnp.ndarray, dst: torch.nn.Parameter):
@@ -24,12 +22,6 @@ def _copy(src: jnp.ndarray, dst: torch.nn.Parameter):
         src = np.asarray(src).copy()
         src = torch.as_tensor(src)
         dst.copy_(src)
-
-
-def _initialize_parameters_recursively(prng_key: jax.random.KeyArray, layer: BaseLayer):
-    param_specs = layer.create_parameter_specs_recursively()
-    params = layer.initialize_parameters_recursively(prng_key, param_specs)
-    return param_specs, params
 
 
 class LayerTest(TestCase):
@@ -41,9 +33,8 @@ class LayerTest(TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
-        self.assertEqual(dict(scale=(dim,), bias=(dim,)), _shapes(layer_param_specs))
-        self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
+        layer_params = layer.initialize_parameters_recursively(init_key)
+        self.assertEqual(dict(scale=(dim,), bias=(dim,)), shapes(layer_params))
 
         # Random inputs.
         prng_key, input_key = jax.random.split(prng_key)
@@ -105,9 +96,8 @@ class LayerTest(TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
-        self.assertEqual(dict(scale=(dim,)), _shapes(layer_param_specs))
-        self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
+        layer_params = layer.initialize_parameters_recursively(init_key)
+        self.assertEqual(dict(scale=(dim,)), shapes(layer_params))
 
         # Random inputs.
         prng_key, input_key = jax.random.split(prng_key)
@@ -149,12 +139,11 @@ class LayerTest(TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_params = layer.initialize_parameters_recursively(init_key)
         self.assertEqual(
             dict(scale=(dim,), bias=(dim,), moving_mean=(dim,), moving_variance=(dim,)),
-            _shapes(layer_param_specs),
+            shapes(layer_params),
         )
-        self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
 
         # Random inputs.
         prng_key, input_key = jax.random.split(prng_key)
@@ -203,12 +192,11 @@ class LayerTest(TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_params = layer.initialize_parameters_recursively(init_key)
         self.assertEqual(
             dict(weight=(input_dim, output_dim), bias=(output_dim,)),
-            _shapes(layer_param_specs),
+            shapes(layer_params),
         )
-        self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
         bias = layer_params["bias"]
         assert_allclose(bias, jnp.zeros_like(bias))
         # Randomize bias.
@@ -272,12 +260,11 @@ class LayerTest(TestCase):
         # Initialize layer parameters.
         prng_key = jax.random.PRNGKey(123)
         prng_key, init_key = jax.random.split(prng_key)
-        layer_param_specs, layer_params = _initialize_parameters_recursively(init_key, layer)
+        layer_params = layer.initialize_parameters_recursively(init_key)
         self.assertEqual(
             dict(weight=(window[0], window[1], input_dim, output_dim), bias=(output_dim,)),
-            _shapes(layer_param_specs),
+            shapes(layer_params),
         )
-        self.assertEqual(_shapes(layer_param_specs), _shapes(layer_params))
         bias = layer_params["bias"]
         assert_allclose(bias, jnp.zeros_like(bias))
         # Randomize bias.
@@ -314,6 +301,37 @@ class LayerTest(TestCase):
         assert_allclose(outputs, ref_outputs.detach().numpy().transpose(0, 2, 3, 1))
 
 
+class EmbedTest(parameterized.TestCase):
+    def build_embedder(dim, num_embeddings, rng):
+        cfg = Embedding.default_config()
+        cfg.dim = dim
+        cfg.num_embeddings = num_embeddings
+        cfg.name = "embed"
+        emb = cfg.instantiate(parent=None)
+        state = emb.initialize_parameters_recursively(rng)
+        return (emb, state)
+
+    @parameterized.parameters(itertools.product((5, 7), (2, 16), (10, 100), (True, False)))
+    def testEmbedLookup(self, seq_len, dim, num_embeddings, is_training):
+        rng = jax.random.PRNGKey(1)
+        embedder, state = EmbedTest.build_embedder(dim, num_embeddings, rng)
+        ixs = jax.random.randint(rng, minval=0, maxval=num_embeddings, shape=(3, seq_len))
+        actual_embeds, _ = module.functional(
+            embedder, rng, state=state, inputs=[ixs], is_training=is_training
+        )
+        np.testing.assert_array_equal(state["weight"][ixs], actual_embeds)
+
+    @parameterized.parameters(itertools.product((5, 7), (2, 16), (10, 100), (True, False)))
+    def testEmbedAttend(self, seq_len, dim, num_embeddings, is_training):
+        rng = jax.random.PRNGKey(1)
+        embedder, state = EmbedTest.build_embedder(dim, num_embeddings, rng)
+        x = jax.random.normal(rng, shape=(3, seq_len, dim))
+        actual_attends = module.functional(
+            embedder, rng, state=state, inputs=[x], is_training=is_training, method="attend"
+        )[0]
+        assert_allclose(jnp.dot(x, state["weight"].T), actual_attends)
+
+
 if __name__ == "__main__":
-    utils.enable_numeric_checks = True
-    absltest.main()
+    with utils.numeric_checks(True):
+        absltest.main()
